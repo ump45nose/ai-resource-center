@@ -1,0 +1,36 @@
+{
+  "name": "ai-resource-center",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 18322",
+    "server": "node server/main.mjs",
+    "build": "tsc --noEmit && vite build",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/static": "^8.3.0",
+    "exceljs": "^4.4.0",
+    "fastify": "^5.6.2",
+    "lucide-react": "^1.57.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^6.0.0",
+    "prettier": "^3.9.10",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.7.0",
+    "vite": "^8.0.5"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

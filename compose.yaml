@@ -1,0 +1,17 @@
+services:
+  ai-resource-center:
+    build: .
+    image: ai-resource-center:20261014
+    container_name: ai-resource-center
+    restart: unless-stopped
+    ports:
+      - "192.168.31.201:18321:18321"
+    volumes:
+      - /vol2/1000/Docker/ai-resource-center/data:/data
+    environment:
+      DATA_DIR: /data
+      PORT: "18321"
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"

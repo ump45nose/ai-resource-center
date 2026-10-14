@@ -1,0 +1,10 @@
+node_modules
+prototype
+data
+.git
+.integration
+docs
+tests
+scripts
+dist
+.env
