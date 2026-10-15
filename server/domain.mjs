@@ -32,6 +32,8 @@ export const channelPatch = z
     note: z.string().optional(),
     order: z.number().int().min(0).optional(),
     client: z.string().optional(),
+    context1m: z.boolean().optional(),
+    gatewayAllowed: z.boolean().optional(),
     headers: z
       .array(z.object({ name: z.string(), value: z.string() }))
       .optional(),
@@ -49,7 +51,7 @@ export function normalizeUrl(value) {
 }
 export function canonicalApi(value, protocol = "OpenAI") {
   const u = new URL(normalizeUrl(value));
-  if (["OpenAI", "OpenAI Responses"].includes(protocol))
+  if (["OpenAI", "OpenAI Responses", "Anthropic"].includes(protocol))
     u.pathname = u.pathname.replace(/\/v1$/, "");
   return u.href.replace(/\/$/, "");
 }
@@ -163,6 +165,16 @@ export function errorType(text = "", status = 0) {
   if (/cancel/i.test(text)) return "cancelled";
   return "upstream";
 }
+export const errorLabel = (type) =>
+  ({
+    rate: "限流",
+    quota: "余额或额度不足",
+    key: "调用凭据错误",
+    account: "账号需验证",
+    input: "请求或模型不兼容",
+    cancelled: "请求取消",
+    upstream: "上游调用失败",
+  })[type] || "原因未确认";
 const median = (values) => {
   const s = values.filter(Number.isFinite).sort((a, b) => a - b);
   return s.length
@@ -225,7 +237,7 @@ export function evaluate(channels, accounts, calls, rules, now = new Date()) {
       new Date(a.validUntil) > now;
     if (
       c.category === "rp" ||
-      c.category === "client" ||
+      (c.category === "client" && !c.nativePassthrough) ||
       !c.gateway ||
       c.mode === "manual"
     )

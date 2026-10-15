@@ -47,6 +47,10 @@ export interface Channel {
   applyMsg?: string;
   order: number;
   client?: string;
+  context1m?: boolean;
+  gatewayAllowed?: boolean;
+  nativePassthrough?: boolean;
+  group?: string;
   headers: Header[];
   clientState?: ClientState;
   samples: number;
@@ -121,6 +125,7 @@ export interface Integration {
   state: "ok" | "failed" | "pending";
   last: string;
   error?: string;
+  coverage?: string;
 }
 export interface Rules {
   days: number;

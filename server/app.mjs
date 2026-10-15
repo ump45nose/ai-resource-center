@@ -11,6 +11,7 @@ import { Gateways } from "./gateways.mjs";
 import { rulesSchema, dayKey, nextReset } from "./domain.mjs";
 import { parseFile, rowSchema } from "./imports.mjs";
 import { clientConfig } from "./exports.mjs";
+import { callReport } from "./calls.mjs";
 
 export async function createApp({
   dir,
@@ -91,6 +92,7 @@ export async function createApp({
       throw new Problem(403, "管理会话来源不一致");
   });
   app.get("/api/health", async () => ({ status: "ok" }));
+  app.get("/api/v1/calls", async (req) => callReport(store, req.query));
   app.post("/api/v1/session", async (req, reply) => {
     const { password } = z.object({ password: z.string() }).parse(req.body),
       p = store.setting("password");
@@ -521,7 +523,11 @@ export async function createApp({
     return { ids };
   });
   async function exported(c, client, model, identity, prepared) {
-    if (["general", "media"].includes(c.category) && !c.gateway)
+    if (
+      c.category !== "rp" &&
+      !c.gateway &&
+      !(c.category === "client" && c.gatewayAllowed === false)
+    )
       throw new Problem(400, "请先接入 fn 网关，再生成应用配置");
     if (c.category === "rp" && client !== "SillyTavern")
       throw new Problem(400, "RP 连接由酒馆独占");
@@ -529,21 +535,29 @@ export async function createApp({
       throw new Problem(400, "该连接限制指定客户端");
     let key = store.reveal(c.credentialId),
       connection = c;
-    if (c.gateway && c.category !== "rp" && c.category !== "client") {
+    if (c.gateway && c.category !== "rp") {
+      if (
+        c.category === "client" &&
+        (!c.nativePassthrough || c.apply !== "synced")
+      )
+        throw new Problem(400, "请先应用客户端原生透传配置");
       const token =
         prepared || (await gateways.inferenceToken(c, identity || client));
       key = token.key;
       const source = gateways.source(c.gateway.sourceId);
       connection = {
         ...c,
+        authType: "bearer",
         protocol:
-          client === "Claude Code"
-            ? "Anthropic"
-            : client === "Codex"
-              ? "OpenAI Responses"
-              : c.protocol === "Anthropic"
-                ? "Anthropic"
-                : "OpenAI",
+          c.category === "client"
+            ? c.protocol
+            : client === "Claude Code"
+              ? "Anthropic"
+              : client === "Codex"
+                ? "OpenAI Responses"
+                : c.protocol === "Anthropic"
+                  ? "Anthropic"
+                  : "OpenAI",
         baseUrl:
           client === "Claude Code" || c.protocol === "Anthropic"
             ? token.baseUrl.replace(/\/v1\/?$/, "")
@@ -620,10 +634,9 @@ export async function createApp({
     if (!c || !c.models.includes(p.model))
       throw new Problem(400, "请选择渠道的已保存模型");
     if (c.category === "rp") throw new Problem(400, "RP 禁止任务测活");
-    if (["general", "media"].includes(c.category) && !c.gateway)
-      throw new Problem(400, "请先接入 fn 网关，再准备评估配置");
+    if (!c.gateway) throw new Problem(400, "请先接入 fn 网关，再准备评估配置");
     let token;
-    if (c.gateway && c.category !== "client") {
+    if (c.gateway) {
       const source = gateways.source(c.gateway.sourceId);
       if (source.kind !== "newapi" || source.version !== "v1.0.0-rc.44")
         throw new Problem(400, "未确认网关固定渠道能力，无法准备评估");

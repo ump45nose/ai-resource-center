@@ -15,7 +15,7 @@ export function clientConfig(c, client, key, model = c.models[0]) {
           ...(c.authType === "api_key"
             ? { ANTHROPIC_API_KEY: key }
             : { ANTHROPIC_AUTH_TOKEN: key }),
-          ANTHROPIC_MODEL: model,
+          ANTHROPIC_MODEL: c.context1m ? model + "[1m]" : model,
           ANTHROPIC_CUSTOM_HEADERS: Object.entries(h)
             .map(([k, v]) => `${k}: ${v}`)
             .join("\n"),
@@ -42,13 +42,28 @@ export function clientConfig(c, client, key, model = c.models[0]) {
       {
         id: c.id,
         name: c.name,
-        baseAPI: c.baseUrl,
+        baseAPI:
+          c.protocol === "Anthropic"
+            ? "anthropic"
+            : c.protocol === "OpenAI Responses"
+              ? "responses"
+              : "chat",
         key,
-        anthropic: c.protocol === "Anthropic" ? c.baseUrl : "",
+        ...(c.protocol === "Anthropic"
+          ? { authHeader: c.authType === "api_key" ? "x-api-key" : "bearer" }
+          : {}),
+        anthropic:
+          c.protocol === "Anthropic"
+            ? c.baseUrl.replace(/\/v1\/?$/, "").replace(/\/$/, "")
+            : "",
         responses: c.protocol === "OpenAI Responses" ? c.baseUrl : "",
         chat: c.protocol === "OpenAI" ? c.baseUrl : "",
         headers: h,
         models: c.models,
+        ...(c.category === "client" ? { passUserAgent: true } : {}),
+        ...(c.context1m
+          ? { contexts: Object.fromEntries(c.models.map((m) => [m, 1000000])) }
+          : {}),
       },
       null,
       2,

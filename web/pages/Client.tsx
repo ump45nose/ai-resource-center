@@ -1,42 +1,68 @@
 import { useState } from "react";
-import { FileCode2, CheckCheck, Save } from "lucide-react";
+import { FileCode2, CheckCheck, Settings2 } from "lucide-react";
 import { useStore } from "../store";
-import { Badge, Btn, Field, inputCls, Url, ApplyBadge } from "../ui";
-import { HeaderEditor, ConfigDrawer } from "../shared";
+import { Badge, Btn, Url, ApplyBadge } from "../ui";
+import { ChannelDrawer, ConfigDrawer, ConflictDrawer } from "../shared";
 import type { Channel } from "../data";
 
 function Card({ c }: { c: Channel }) {
-  const { s, saveChannel, updChannel, toast, act } = useStore();
-  const [h, setH] = useState(c.headers);
-  const [key, setKey] = useState("");
-  const [url, setUrl] = useState(c.baseUrl);
-  const [cfg, setCfg] = useState(false);
+  const { s, act } = useStore();
+  const [cfg, setCfg] = useState(false),
+    [edit, setEdit] = useState(false),
+    [conflict, setConflict] = useState(false);
   const site = s.sites.find((x) => x.id === c.siteId)!;
-  const dirty =
-    JSON.stringify(h) !== JSON.stringify(c.headers) || key || url !== c.baseUrl;
-  const st =
-    c.clientState === "verified" ? (
-      <Badge tone="ok">已验证</Badge>
-    ) : c.clientState === "awaiting" ? (
-      <Badge tone="warn">待客户端确认</Badge>
-    ) : (
-      <Badge tone="mute">待生成配置</Badge>
-    );
+  const source = s.integrations.find((x) => x.id === c.gateway?.sourceId);
+  const gateway = s.integrations.find((x) => x.kind === "newapi");
+  const canExport = c.gateway
+    ? !!c.nativePassthrough && c.apply === "synced"
+    : c.gatewayAllowed === false && c.hasKey;
   return (
-    <div className="rounded-lg border border-zinc-200 bg-white">
-      <div className="flex flex-wrap items-start justify-between gap-2 border-b border-zinc-200 px-4 py-3">
+    <div className="rounded-lg border border-zinc-200 bg-white p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-semibold text-zinc-900">{c.client}</span>
-            {st}
+          <div className="flex flex-wrap items-center gap-2 font-medium">
+            {c.name}
+            <Badge tone="info">仅 {c.client || "客户端待确认"}</Badge>
             <ApplyBadge a={c.apply} />
+            <Badge tone={c.clientState === "verified" ? "ok" : "warn"}>
+              {c.clientState === "verified"
+                ? "真实任务已验证"
+                : "待真实任务确认"}
+            </Badge>
           </div>
-          <div className="mt-0.5 text-xs text-zinc-500">
-            {c.name} · <Url href={site.url} /> · v{c.version}
+          <div className="mt-1 text-sm">
+            <Url href={site.url} />
           </div>
         </div>
-        <div className="flex flex-wrap gap-1">
-          <Btn size="sm" onClick={() => setCfg(true)}>
+        <div className="flex flex-wrap gap-2">
+          <Btn size="sm" onClick={() => setEdit(true)}>
+            <Settings2 size={13} />
+            编辑连接
+          </Btn>
+          {!c.gateway && gateway && c.gatewayAllowed !== false && (
+            <Btn
+              size="sm"
+              disabled={!c.hasKey || !c.models.length}
+              onClick={() =>
+                act(`/channels/${c.id}/connect-gateway`, {
+                  sourceId: gateway.id,
+                })
+              }
+            >
+              接入 New API
+            </Btn>
+          )}
+          {c.gateway && c.apply !== "diff" && (
+            <Btn size="sm" onClick={() => act(`/channels/${c.id}/apply`, {})}>
+              {c.nativePassthrough ? "应用网关配置" : "应用原生透传"}
+            </Btn>
+          )}
+          {c.apply === "diff" && (
+            <Btn size="sm" onClick={() => setConflict(true)}>
+              处理网关差异
+            </Btn>
+          )}
+          <Btn size="sm" disabled={!canExport} onClick={() => setCfg(true)}>
             <FileCode2 size={13} />
             生成配置
           </Btn>
@@ -49,92 +75,80 @@ function Card({ c }: { c: Channel }) {
             }}
           >
             <CheckCheck size={13} />
-            登记真实任务成功
+            登记任务成功
           </Btn>
         </div>
       </div>
-      <div className="grid gap-4 p-4 lg:grid-cols-2">
-        <div className="grid content-start gap-3">
-          <div className="grid grid-cols-2 gap-3 text-xs">
-            <div>
-              <div className="text-zinc-500">协议</div>
-              <div className="mt-0.5 text-sm">{c.protocol}</div>
-            </div>
-            <div>
-              <div className="text-zinc-500">选定模型</div>
-              <div className="mt-0.5 font-mono text-sm">
-                {c.models.join(", ")}
-              </div>
-            </div>
-          </div>
-          <Field label="地址">
-            <input
-              className={inputCls + " font-mono text-xs"}
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-            />
-          </Field>
-          <Field
-            label={`认证凭据（当前 ${c.keyMask}）`}
-            hint="单独维护，不写入请求头"
-          >
-            <input
-              className={inputCls + " font-mono text-xs"}
-              type="password"
-              placeholder="粘贴新 key"
-              value={key}
-              onChange={(e) => setKey(e.target.value)}
-            />
-          </Field>
-          <p className="text-xs text-zinc-500">
-            模型列表读取成功不等于调用可用；生成配置后为「待客户端确认」，真实任务成功后才为「已验证」。
-          </p>
+      <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+        <div>
+          协议：{c.protocol} · key：
+          {c.hasKey ? "已保存" : c.gateway ? "由网关保存" : "缺少，待补充"}
+        </div>
+        <div className="break-all">
+          模型：{c.models.join("、") || "待确认"}
+          {c.context1m ? " · 原生 1M" : ""}
+        </div>
+        <div className="break-all">
+          入口：
+          {source ? (
+            <Url href={source.url} />
+          ) : c.gatewayAllowed === false ? (
+            "站点禁止网关转发，保留直连"
+          ) : (
+            "尚未接入 fn"
+          )}
         </div>
         <div>
-          <HeaderEditor headers={h} onChange={setH} />
-          <div className="mt-3 flex justify-end">
-            <Btn
-              size="sm"
-              kind="primary"
-              disabled={!dirty || c.apply === "saving"}
-              onClick={() => {
-                saveChannel(c.id, {
-                  headers: h,
-                  baseUrl: url,
-                  ...(key ? { key } : {}),
-                });
-                setKey("");
-              }}
-            >
-              <Save size={13} />
-              {c.apply === "saving" ? "保存中…" : "保存"}
-            </Btn>
-          </div>
+          透传：{c.nativePassthrough ? "原生正文与客户端请求头" : "未应用"} ·{" "}
+          {c.mode === "auto" ? "按客户端组自动调整" : "人工管理"}
         </div>
       </div>
+      {c.group && (
+        <p className="mt-2 text-xs text-zinc-500">独立分组：{c.group}</p>
+      )}
+      {c.applyMsg && (
+        <p
+          className={`mt-2 text-sm ${["failed", "diff"].includes(c.apply) ? "text-red-700" : "text-amber-800"}`}
+        >
+          {c.applyMsg}
+        </p>
+      )}
+      {c.availability && (
+        <p className="mt-2 text-sm text-red-700">调用问题：{c.availability}</p>
+      )}
+      {c.note && (
+        <p className="mt-2 whitespace-pre-line text-xs text-zinc-600">
+          {c.note}
+        </p>
+      )}
+      {edit && <ChannelDrawer id={c.id} onClose={() => setEdit(false)} />}
+      {conflict && (
+        <ConflictDrawer id={c.id} onClose={() => setConflict(false)} />
+      )}
       {cfg && (
         <ConfigDrawer
           id={c.id}
           client={c.client!}
-          title="配置预览"
+          title="fn 调用配置"
           onClose={() => setCfg(false)}
         />
       )}
     </div>
   );
 }
-
 export default function ClientView() {
   const { s } = useStore();
-  const list = s.channels.filter((c) => c.category === "client");
   return (
     <div className="grid gap-4">
       <p className="text-sm text-zinc-600">
-        按指定客户端条件单独维护，不进入公共网关自动调整。
+        New API 按客户端和原生协议分组；保留客户端特征。配置使用 fn
+        推理身份，真实任务成功后再确认可用。调用记录见「渠道评价」。
       </p>
-      {list.map((c) => (
-        <Card key={c.id} c={c} />
-      ))}
+      {s.channels
+        .filter((c) => c.category === "client")
+        .map((c) => (
+          <Card key={c.id} c={c} />
+        ))}
     </div>
   );
 }

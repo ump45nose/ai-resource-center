@@ -12,13 +12,14 @@ import {
 } from "../ui";
 import { ConfigDrawer } from "../shared";
 import type { Evaluation } from "../data";
+import { Calls } from "../Calls";
 
 export default function Eval() {
   const { s, act, toast } = useStore();
   const r = s.rules;
   const site = (id: string) => s.sites.find((x) => x.id === id)!;
   const pub = s.channels
-    .filter((c) => ["general", "media"].includes(c.category))
+    .filter((c) => c.category !== "rp" && c.gateway)
     .sort((a, b) => b.priority - a.priority);
   const evalable = s.channels.filter(
     (c) =>
@@ -46,9 +47,12 @@ export default function Eval() {
         title="渠道评价"
         desc={`默认规则：近 ${r.days} 天 · 至少 ${r.samples} 样本 · 观测成功率 ≥${r.good}% 开放，<${r.warn}% 降级；样本不足保留原路由`}
       />
+      <div className="mb-5">
+        <Calls />
+      </div>
       <Section
-        title="公共网关渠道（New API 自动调整）"
-        desc="RP 与客户端绑定资源不进入公共网关调整"
+        title="网关渠道质量与调整"
+        desc="RP 不参与；客户端限定渠道仅在对应客户端与协议组内比较，人工模式不自动调整"
       >
         <div className="overflow-x-auto">
           <table className="hidden w-full text-sm md:table">

@@ -1,6 +1,6 @@
 # 多客户端配置、原生同步与 fn 网关
 
-推荐保持现有 fn 网关，用 Magpie 原生能力配置客户端和同步连接库；客户端限定渠道优先验证 New API 的原生协议透传。无需为“保留客户端标识”新增 Hub，也无需开发上一版提出的中心配置源和设备回执服务。
+已选择 fn New API 聚合允许转发的非 RP 资源，用 Magpie 原生能力配置客户端和同步连接库；客户端限定渠道启用 New API 原生协议透传及独立客户端分组。无需为“保留客户端标识”新增 Hub，也无需开发上一版提出的中心配置源和设备回执服务。
 
 管理中心继续聚合资源、签到、权益和调用情况。客户端长期使用稳定入口，上游调整在 fn 完成；RP 继续直连酒馆。
 
@@ -106,7 +106,7 @@ HTTP 代理保留的是 HTTP 请求特征；上游看到的出口 IP 和 TLS 连
 
 上次只根据 `passUserAgent` 字段解释默认行为不完整。Magpie 对 Claude Code 的 Anthropic 转发已有专门的头和正文保留逻辑；Remote Magpie 的会话转发也保留 Claude Code/Codex 特征，包括 Codex 的 originator。`passUserAgent` 是额外的通用透传选项，不是所有原生兼容路径的唯一开关。
 
-因此使用 Magpie 本机或 Hub 都是现成方案，真实验证仍从受限渠道指定的客户端发起。现有中心 Magpie 导出的 `baseAPI` 枚举、Anthropic 根地址和认证映射仍需修正；这属于导出适配，不需要新增同步系统。
+因此使用 Magpie 本机或 Hub 都是现成方案，真实验证仍从受限渠道指定的客户端发起。中心 Magpie 导出已修正 `baseAPI` 枚举、Anthropic 根地址和认证映射；客户端资源保留 UA 透传，1M 模型导出对应上下文配置，不需要新增同步系统。
 
 ## 界面和开发范围
 
@@ -127,3 +127,9 @@ HTTP 代理保留的是 HTTP 请求特征；上游看到的出口 IP 和 TLS 连
 - [New API Responses 正文透传](https://github.com/QuantumNous/new-api/blob/v1.0.0-rc.44/relay/responses_request.go)
 - [New API 自动测试筛选](https://github.com/QuantumNous/new-api/blob/v1.0.0-rc.44/controller/channel-test.go)
 - [Nginx 请求头、正文与缓冲配置](https://nginx.org/en/docs/http/ngx_http_proxy_module.html)
+
+## 已采用的接入方式
+
+用户已选择 New API 聚合。中心的客户端视图提供接入、原生透传应用、配置生成和真实任务确认。导出为 fn 地址与应用独立身份；指定客户端限制保留，Magpie 导出仍需要由对应客户端使用。明确禁止网关转发的站点单独注明，未确认的协议/模型不自动推测。
+
+「渠道评价」增加实际调用统计：近 1/7/30/90 天，按渠道、模型、应用身份汇总，按来源和结果筛选、分页查看。New API 消费/失败日志及生成任务按来源 ID 去重；CPA 读取 Manager 持久记录，不再消费队列。中心只统计运行情况与 Token，不复制费用账本。

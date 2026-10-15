@@ -329,7 +329,7 @@ export class Center {
     } else if (c.category === "client") {
       if (!c.client) throw new Problem(400, "客户端绑定必须填写客户端");
       c.bindings = [c.client];
-      c.mode = "manual";
+      if (!c.gateway || !c.nativePassthrough) c.mode = "manual";
       c.accessMode = "client_bound";
       c.clientState = "draft";
     } else c.accessMode = "gateway";

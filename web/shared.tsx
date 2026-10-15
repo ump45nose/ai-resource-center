@@ -141,6 +141,8 @@ export function ChannelDrawer({
       "category",
       "client",
       "authType",
+      "context1m",
+      "gatewayAllowed",
     ] as const;
     const patch = Object.fromEntries(
       fields
@@ -188,7 +190,7 @@ export function ChannelDrawer({
           {c.applyMsg}
         </div>
       )}
-      {!c.gateway && ["general", "media"].includes(c.category) && (
+      {!c.gateway && c.category !== "rp" && (
         <div className="mb-4 rounded border border-blue-200 bg-blue-50 p-3 text-sm">
           接入 fn 网关后，再为各应用生成独立调用身份。
           {s.integrations
@@ -196,7 +198,9 @@ export function ChannelDrawer({
             .map((i) => (
               <Btn
                 key={i.id}
-                disabled={!c.hasKey || !c.models.length}
+                disabled={
+                  !c.hasKey || !c.models.length || c.gatewayAllowed === false
+                }
                 onClick={() => {
                   void act(`/channels/${c.id}/connect-gateway`, {
                     sourceId: i.id,
@@ -255,6 +259,28 @@ export function ChannelDrawer({
               ))}
             </select>
           </Field>
+        )}
+        {f.category === "client" && (
+          <div className="grid gap-2 text-sm">
+            <label>
+              <input
+                type="checkbox"
+                checked={f.gatewayAllowed !== false}
+                onChange={(e) => up({ gatewayAllowed: e.target.checked })}
+              />{" "}
+              站点允许网关转发
+            </label>
+            {f.client === "Claude Code" && (
+              <label>
+                <input
+                  type="checkbox"
+                  checked={!!f.context1m}
+                  onChange={(e) => up({ context1m: e.target.checked })}
+                />{" "}
+                Claude Code 使用原生 1M 上下文
+              </label>
+            )}
+          </div>
         )}
         <Field label="渠道名称">
           <input
@@ -374,7 +400,10 @@ export function ChannelDrawer({
             <select
               className={inputCls}
               value={f.mode}
-              disabled={f.category !== "general" && f.category !== "media"}
+              disabled={
+                f.category === "rp" ||
+                (f.category === "client" && !c.nativePassthrough)
+              }
               onChange={(e) => up({ mode: e.target.value as Channel["mode"] })}
             >
               <option value="auto">自动</option>

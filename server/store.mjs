@@ -30,6 +30,26 @@ export class Store {
       CREATE TABLE IF NOT EXISTS actions(id TEXT PRIMARY KEY,target TEXT NOT NULL,occurred_at TEXT NOT NULL,data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS auth(token_hash TEXT PRIMARY KEY,role TEXT NOT NULL,scope TEXT NOT NULL,expires_at INTEGER);
       CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,data TEXT NOT NULL);`);
+    const columns = new Set(
+      this.db
+        .prepare("PRAGMA table_info(calls)")
+        .all()
+        .map((x) => x.name),
+    );
+    for (const [name, type] of Object.entries({
+      upstream_channel: "TEXT",
+      application: "TEXT",
+      input_tokens: "INTEGER",
+      output_tokens: "INTEGER",
+      is_stream: "INTEGER",
+      group_name: "TEXT",
+    })) {
+      if (!columns.has(name))
+        this.db.exec(`ALTER TABLE calls ADD COLUMN ${name} ${type}`);
+    }
+    this.db.exec(
+      "CREATE INDEX IF NOT EXISTS calls_time ON calls(occurred_at); CREATE INDEX IF NOT EXISTS calls_source_channel ON calls(source,upstream_channel)",
+    );
   }
   transaction(fn) {
     this.db.exec("BEGIN IMMEDIATE");

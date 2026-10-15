@@ -1,8 +1,10 @@
 import { isDeepStrictEqual } from "node:util";
 import { randomUUID, randomBytes } from "node:crypto";
 import { Problem } from "./center.mjs";
+import { hash } from "./store.mjs";
 import {
   errorType,
+  errorLabel,
   normalizeUrl,
   canonicalApi,
   availability,
@@ -13,7 +15,7 @@ const routing = (c) => ({
   weight: c.weight || 100,
   models: c.models,
   name: c.name,
-  base_url: c.baseUrl,
+  base_url: canonicalApi(c.baseUrl, c.protocol),
   status: c.enabled ? 1 : 2,
 });
 const observed = (x) => ({
@@ -23,7 +25,56 @@ const observed = (x) => ({
   name: x.name,
   base_url: x.base_url || "",
   status: x.status,
+  native: hash(
+    JSON.stringify([x.type, x.group, x.auto_ban, x.setting, x.header_override]),
+  ),
 });
+const matchesSnapshot = (remote, snapshot) =>
+  Object.entries(snapshot).every(([key, value]) =>
+    isDeepStrictEqual(remote[key], value),
+  );
+const clientGroup = (c) =>
+  `arc-${c.client.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${c.protocol.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+const nativeFields = (c, remote = {}) => ({
+  type: c.protocol === "Anthropic" ? 14 : 1,
+  group: clientGroup(c),
+  auto_ban: 0,
+  setting: JSON.stringify({
+    ...JSON.parse(remote.setting || "{}"),
+    pass_through_body_enabled: true,
+  }),
+  header_override: JSON.stringify({
+    "*": true,
+    ...Object.fromEntries(c.headers.map((x) => [x.name, x.value])),
+    Authorization: "Bearer {api_key}",
+  }),
+});
+function streamOutcome(value) {
+  if (!value) return null;
+  if (typeof value === "string")
+    return [
+      "ok",
+      "completed",
+      "disconnected",
+      "failed",
+      "cancelled",
+      "incomplete",
+    ].includes(value)
+      ? value
+      : null;
+  if (
+    value.response_status === "cancelled" ||
+    value.end_reason === "client_gone"
+  )
+    return "cancelled";
+  if (value.response_status === "failed") return "failed";
+  if (value.response_status === "incomplete") return "incomplete";
+  return value.status === "error"
+    ? "disconnected"
+    : value.status === "ok"
+      ? "completed"
+      : null;
+}
 export class Gateways {
   constructor(center, fetcher = fetch) {
     this.center = center;
@@ -32,6 +83,7 @@ export class Gateways {
     this.running = false;
     this.applying = new Set();
     this.provisioning = new Map();
+    this.syncing = new Map();
     this.lastEligibilityCheck = null;
   }
   source(id) {
@@ -60,6 +112,12 @@ export class Gateways {
   }
   async pages(source, path, query = {}) {
     const rows = [];
+    for await (const items of this.pageBatches(source, path, query))
+      rows.push(...items);
+    return rows;
+  }
+  async *pageBatches(source, path, query = {}) {
+    let count = 0;
     let page = 1;
     for (;;) {
       const data = await this.request(
@@ -68,12 +126,13 @@ export class Gateways {
       );
       const items = data.items || data;
       if (!Array.isArray(items)) throw new Problem(502, "来源分页格式不兼容");
-      rows.push(...items);
+      count += items.length;
+      yield items;
       if (
         items.length < 100 ||
-        (data.total !== undefined && rows.length >= data.total)
+        (data.total !== undefined && count >= data.total)
       )
-        return rows;
+        return;
       if (page++ >= 1000)
         throw new Problem(502, "来源数据过大，请缩小同步区间");
     }
@@ -152,8 +211,9 @@ export class Gateways {
   async connectOnce(id, sourceId) {
     const c = this.store.get("channel", id),
       source = this.source(sourceId);
-    if (!c || !["general", "media"].includes(c.category))
+    if (!c || c.category === "rp")
       throw new Problem(400, "只有通用与生图视频连接可以接入公共网关");
+    if (c.category === "client") await this.checkClient(source, c);
     if (source.kind !== "newapi")
       throw new Problem(400, "新增渠道仅支持 New API");
     if (c.gateway) throw new Problem(409, "已经关联网关，请先读取现有配置");
@@ -191,6 +251,7 @@ export class Gateways {
           header_override: JSON.stringify(
             Object.fromEntries(c.headers.map((x) => [x.name, x.value])),
           ),
+          ...(c.category === "client" ? nativeFields(c) : {}),
         },
       });
       remote = (await this.pages(source, "/api/channel/")).find(
@@ -206,13 +267,19 @@ export class Gateways {
       gateway: { sourceId, channelId: remote.id },
       applied: observed(remote),
       group: remote.group,
+      nativePassthrough: c.category === "client" || undefined,
       version: current.version + 1,
       apply: current.version === c.version ? "synced" : "pending",
       applyMsg:
         current.version === c.version
           ? "New API 已创建并回读；没有调用上游"
           : "已关联网关；期间的中心修改仍待应用",
-      mode: current.version === c.version ? "auto" : current.mode,
+      mode:
+        c.category === "client"
+          ? "manual"
+          : current.version === c.version
+            ? "auto"
+            : current.mode,
       baseRouting: {
         priority: remote.priority || 0,
         weight: remote.weight || 100,
@@ -226,6 +293,42 @@ export class Gateways {
       channelId: remote.id,
     });
     return this.center.publicChannel(saved);
+  }
+  async checkClient(source, c) {
+    if (source.kind !== "newapi")
+      throw new Problem(400, "客户端限定连接仅接入 New API");
+    if (c.gatewayAllowed === false)
+      throw new Problem(400, "该渠道明确禁止网关转发，保留客户端直连");
+    if (
+      !c.client ||
+      !["Anthropic", "OpenAI Responses", "OpenAI"].includes(c.protocol)
+    )
+      throw new Problem(400, "请确认所需客户端与原生协议");
+    const options = await this.request(source, "/api/option/");
+    const setting = Object.fromEntries(options.map((x) => [x.key, x.value]));
+    if (
+      setting["monitor_setting.auto_test_channel_enabled"] === "true" &&
+      !["auto_ban_only", "passive_recovery"].includes(
+        setting["monitor_setting.channel_test_mode"],
+      )
+    )
+      throw new Problem(
+        409,
+        "New API 当前自动测试模式不能排除客户端渠道，请先调整测试范围",
+      );
+    // Keep all existing groups; only add the isolated client group when absent.
+    for (const key of ["GroupRatio", "UserUsableGroups"]) {
+      const groups = JSON.parse(setting[key] || "{}");
+      const group = clientGroup(c);
+      if (!Object.hasOwn(groups, group)) {
+        groups[group] =
+          key === "GroupRatio" ? 1 : `${c.client} · ${c.protocol}`;
+        await this.request(source, "/api/option/", "PUT", {
+          key,
+          value: JSON.stringify(groups),
+        });
+      }
+    }
   }
   async applyOnce(id, { force = false, automatic = false } = {}) {
     const c = this.store.get("channel", id);
@@ -247,7 +350,7 @@ export class Gateways {
         `/api/channel/${c.gateway.channelId}`,
       );
       remote = observed(fullRemote);
-      if (c.applied && !force && !isDeepStrictEqual(remote, c.applied)) {
+      if (c.applied && !force && !matchesSnapshot(remote, c.applied)) {
         this.store.put("channel", {
           ...c,
           apply: "diff",
@@ -256,9 +359,17 @@ export class Gateways {
         });
         throw new Problem(409, "发现外部配置修改", { external: remote });
       }
+      if (c.category === "client") await this.checkClient(source, c);
+      const native = c.category === "client" ? nativeFields(c, fullRemote) : {};
       const desired = automatic
         ? { ...remote, priority: c.priority, weight: c.weight }
-        : routing(c);
+        : {
+            ...remote,
+            ...routing(c),
+            ...(c.category === "client"
+              ? { native: observed({ ...fullRemote, ...native }).native }
+              : {}),
+          };
       if (c.category === "rp") desired.status = 2;
       const {
         key,
@@ -280,6 +391,7 @@ export class Gateways {
         base_url: desired.base_url,
         priority: desired.priority,
         weight: desired.weight,
+        ...native,
         ...(!automatic && c.credentialPending
           ? { key: this.store.reveal(c.credentialId) }
           : {}),
@@ -307,6 +419,9 @@ export class Gateways {
       this.store.put("channel", {
         ...current,
         applied: after,
+        ...(c.category === "client"
+          ? { nativePassthrough: true, group: native.group }
+          : {}),
         ...(!automatic && c.credentialPending
           ? { credentialPending: current.credentialId !== c.credentialId }
           : {}),
@@ -361,8 +476,12 @@ export class Gateways {
       external: undefined,
       mode: "manual",
       version: c.version + 1,
-      apply: "synced",
-      applyMsg: "已采用网关配置，转为人工管理",
+      nativePassthrough: c.category === "client" ? false : c.nativePassthrough,
+      apply: c.category === "client" ? "pending" : "synced",
+      applyMsg:
+        c.category === "client"
+          ? "已采用网关配置；请应用并回读客户端透传设置"
+          : "已采用网关配置，转为人工管理",
     });
   }
   call(source, id, c, model, time, result, detail = {}) {
@@ -371,13 +490,14 @@ export class Gateways {
       .get(source, String(id));
     this.store.db
       .prepare(
-        "INSERT INTO calls VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(source,source_id) DO UPDATE SET result=excluded.result,error_type=excluded.error_type,summary=excluded.summary",
+        `INSERT INTO calls(source,source_id,channel_id,model,occurred_at,result,error_type,latency,ttft,request_id,token_id,stream_status,summary,upstream_channel,application,input_tokens,output_tokens,is_stream,group_name)
+         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(source,source_id) DO UPDATE SET channel_id=excluded.channel_id,result=excluded.result,error_type=excluded.error_type,summary=excluded.summary,latency=excluded.latency,ttft=excluded.ttft,application=excluded.application,input_tokens=excluded.input_tokens,output_tokens=excluded.output_tokens,is_stream=excluded.is_stream,group_name=excluded.group_name,upstream_channel=excluded.upstream_channel`,
       )
       .run(
         source,
         String(id),
-        c.id,
-        model,
+        c?.id || "",
+        model || "",
         time,
         result,
         detail.errorType || null,
@@ -391,7 +511,14 @@ export class Gateways {
             ? JSON.stringify(detail.streamStatus)
             : null,
         detail.summary?.slice(0, 300) || null,
+        detail.upstreamChannel != null ? String(detail.upstreamChannel) : null,
+        detail.application || null,
+        Number.isFinite(detail.inputTokens) ? detail.inputTokens : null,
+        Number.isFinite(detail.outputTokens) ? detail.outputTokens : null,
+        typeof detail.isStream === "boolean" ? Number(detail.isStream) : null,
+        detail.group || null,
       );
+    if (!c) return;
     const current = this.store.get("channel", c.id);
     if (
       (!previous || previous.result !== result) &&
@@ -429,6 +556,17 @@ export class Gateways {
         channels.map((c) => "openai-compatible-" + c.gateway.provider),
       ),
     ];
+    const identities = new Map(
+      this.store
+        .list("identity")
+        .filter(
+          (i) =>
+            (i.sourceId ||
+              this.store.get("channel", i.channelId)?.gateway?.sourceId) ===
+              source.id && i.credentialId,
+        )
+        .map((i) => [hash(this.store.reveal(i.credentialId)), i.application]),
+    );
     if (!providers.length) return { records: 0, unmatched: 0 };
     let before = {},
       records = 0,
@@ -455,11 +593,8 @@ export class Gateways {
             "openai-compatible-" + c.gateway.provider ===
             x.auth_provider_snapshot,
         );
-        if (matches.length !== 1) {
-          unmatched++;
-          continue;
-        }
-        const c = matches[0];
+        if (matches.length !== 1) unmatched++;
+        const c = matches.length === 1 ? matches[0] : null;
         this.call(
           source.id,
           x.event_hash,
@@ -474,8 +609,15 @@ export class Gateways {
             latency: x.latency_ms,
             ttft: x.ttft_ms,
             requestId: x.request_id,
+            upstreamChannel: x.auth_provider_snapshot,
+            application:
+              identities.get(x.access_token_sha256) ||
+              identities.get(x.api_key_hash),
+            inputTokens: x.input_tokens,
+            outputTokens: x.output_tokens,
+            isStream: x.stream,
             summary: x.failed
-              ? `HTTP ${x.fail_status_code || "未知"} · ${errorType(x.fail_summary, x.fail_status_code)}`
+              ? `HTTP ${x.fail_status_code || "未知"} · ${errorLabel(errorType(x.fail_summary, x.fail_status_code))}`
               : null,
           },
         );
@@ -500,11 +642,14 @@ export class Gateways {
         s.id === source.id
           ? {
               ...s,
-              cursorMs: end - 1,
+              cursorMs:
+                s.cursorMs !== source.cursorMs
+                  ? Math.min(s.cursorMs ?? end, end - 60000)
+                  : end - 60000,
               last: new Date().toISOString(),
               error: null,
               coverage: unmatched
-                ? `${unmatched} 条因凭据无法唯一关联而未计入；只读取 Manager 已存记录`
+                ? `${unmatched} 条无法唯一关联，已保留为待关联；只读取 Manager 已存记录`
                 : "只读取 Manager 已存记录；账号反代不计入",
             }
           : s,
@@ -514,6 +659,16 @@ export class Gateways {
     return { records, unmatched };
   }
   async sync(id) {
+    if (this.syncing.has(id)) return this.syncing.get(id);
+    const operation = this.syncOnce(id);
+    this.syncing.set(id, operation);
+    try {
+      return await operation;
+    } finally {
+      this.syncing.delete(id);
+    }
+  }
+  async syncOnce(id) {
     const source = this.source(id);
     if (source.kind === "cpa") return this.syncCpa(source);
     if (source.kind !== "newapi")
@@ -522,49 +677,103 @@ export class Gateways {
     source.version = serverStatus.version;
     const since = source.cursor || Math.floor(Date.now() / 1000) - 7 * 86400,
       end = Math.floor(Date.now() / 1000);
-    const logs = await this.pages(source, "/api/log/", {
-      start_timestamp: since,
-      end_timestamp: end,
-    });
     const channels = this.store
       .list("channel")
       .filter((c) => c.gateway?.sourceId === id);
-    for (const x of logs.filter((x) => [2, 5].includes(x.type))) {
-      const c = channels.find(
-        (c) => c.gateway.channelId === (x.channel ?? x.channel_id),
-      );
-      if (!c || c.category === "rp") continue;
-      const other =
-        typeof x.other === "string"
-          ? JSON.parse(x.other || "{}")
-          : x.other || {};
-      // Text log records are attempts; media completion is ingested from task state below.
-      if (c.category === "media") continue;
-      const error =
-        x.type === 5 ? errorType(x.content, other.status_code) : null;
-      this.call(
-        id,
-        x.id,
-        c,
-        x.model_name,
-        new Date(x.created_at * 1000).toISOString(),
-        x.type === 2 ? "success" : "failure",
-        {
-          errorType: error,
-          latency: Number.isFinite(x.use_time) ? x.use_time * 1000 : null,
-          ttft: Number.isFinite(other.frt) ? other.frt : null,
-          requestId: x.request_id,
-          tokenId: x.token_id,
-          streamStatus: other.stream_status,
-          summary:
+    const byId = new Map(channels.map((c) => [String(c.gateway.channelId), c]));
+    const applications = new Map(
+      this.store
+        .list("identity")
+        .filter(
+          (i) =>
+            (i.sourceId ||
+              this.store.get("channel", i.channelId)?.gateway?.sourceId) === id,
+        )
+        .map((i) => [String(i.tokenId), i.application]),
+    );
+    let records = 0,
+      unmatched = 0;
+    for await (const page of this.pageBatches(source, "/api/log/", {
+      start_timestamp: since,
+      end_timestamp: end,
+    })) {
+      this.store.transaction(() => {
+        for (const x of page.filter((x) => [2, 5].includes(x.type))) {
+          const upstreamChannel = x.channel ?? x.channel_id;
+          const c = byId.get(String(upstreamChannel));
+          if (c?.category === "rp") continue;
+          const other =
+            typeof x.other === "string"
+              ? JSON.parse(x.other || "{}")
+              : x.other || {};
+          // Text log records are attempts; media completion is ingested from task state below.
+          if (c?.category === "media") continue;
+          if (!c) unmatched++;
+          records++;
+          const stream = streamOutcome(other.stream_status);
+          const streamFailed = [
+            "disconnected",
+            "failed",
+            "incomplete",
+            "cancelled",
+          ].includes(stream);
+          const error =
             x.type === 5
-              ? `HTTP ${other.status_code || "未知"} · ${error}`
-              : null,
-        },
-      );
+              ? errorType(x.content, other.status_code)
+              : streamFailed
+                ? stream === "cancelled"
+                  ? "cancelled"
+                  : "upstream"
+                : null;
+          const attempt = other.admin_info?.request_policy?.findLast(
+            (p) =>
+              p.channel_id === upstreamChannel &&
+              p.decision?.source === "upstream",
+          );
+          this.call(
+            id,
+            x.id,
+            c,
+            x.model_name,
+            new Date(x.created_at * 1000).toISOString(),
+            x.type === 2 && !streamFailed ? "success" : "failure",
+            {
+              errorType: error,
+              latency: Number.isFinite(attempt?.elapsed_ms)
+                ? attempt.elapsed_ms
+                : x.use_time > 0
+                  ? x.use_time * 1000
+                  : null,
+              ttft: Number.isFinite(other.frt) ? other.frt : null,
+              requestId: x.request_id,
+              tokenId: x.token_id,
+              upstreamChannel,
+              application: applications.get(String(x.token_id)),
+              inputTokens: x.prompt_tokens,
+              outputTokens: x.completion_tokens,
+              isStream: x.is_stream,
+              group: x.group,
+              streamStatus: stream,
+              summary:
+                x.type === 5
+                  ? `HTTP ${other.status_code || "未知"} · ${errorLabel(error)}`
+                  : streamFailed
+                    ? `流式${stream === "cancelled" ? "取消" : "中断或未完成"}`
+                    : null,
+            },
+          );
+        }
+      });
     }
+    const pending = this.store.db
+      .prepare(
+        "SELECT MIN(occurred_at) AS first FROM calls WHERE source=? AND result='pending'",
+      )
+      .get(id).first;
     const tasks = await this.pages(source, "/api/task", {
-      start_timestamp: Math.floor(Date.now() / 1000) - 7 * 86400,
+      start_timestamp: pending
+        ? Math.min(since, Math.floor(new Date(pending).getTime() / 1000))
+        : since,
       end_timestamp: end,
     });
     for (const x of tasks) {
@@ -587,6 +796,9 @@ export class Gateways {
         result,
         {
           errorType: result === "failure" ? errorType(x.fail_reason) : null,
+          upstreamChannel: x.channel_id ?? x.channel,
+          tokenId: x.token_id,
+          application: applications.get(String(x.token_id)),
           summary: result === "failure" ? "生成任务失败" : null,
         },
       );
@@ -598,16 +810,21 @@ export class Gateways {
           ? {
               ...s,
               version: source.version,
-              cursor: end - 1,
+              cursor:
+                s.cursor !== source.cursor
+                  ? Math.min(s.cursor ?? end, end - 60)
+                  : end - 60,
               last: new Date().toISOString(),
               error: null,
               coverage: "仅反映网关已记录的调用；部分失败未记录",
+              unmatched,
+              logConsumeEnabled: serverStatus.log_consume_enabled,
             }
           : s,
       ),
     );
     this.center.recompute();
-    return { records: logs.length, tasks: tasks.length };
+    return { records, unmatched, tasks: tasks.length };
   }
   async recalculateAndApply() {
     const result = this.center.recompute();
@@ -615,7 +832,7 @@ export class Gateways {
       (c) =>
         c.mode === "auto" &&
         c.gateway &&
-        ["general", "media"].includes(c.category) &&
+        ["general", "media", "client"].includes(c.category) &&
         this.source(c.gateway.sourceId).kind === "newapi" &&
         !["diff", "conflict", "failed", "pending"].includes(c.apply),
     )) {
@@ -658,7 +875,7 @@ export class Gateways {
           (c) =>
             c.mode === "auto" &&
             c.gateway &&
-            ["general", "media"].includes(c.category) &&
+            ["general", "media", "client"].includes(c.category) &&
             availability(
               c,
               accounts.find((a) => a.id === c.accountId),
@@ -703,11 +920,18 @@ export class Gateways {
     if (old?.credentialId && !pinned) {
       if (source.kind === "newapi") {
         const token = await this.request(source, `/api/token/${old.tokenId}`);
-        if (token.model_limits !== c.models.join(",")) {
+        const group = c.group?.split(",")[0] || "default";
+        if (
+          token.model_limits !== c.models.join(",") ||
+          token.group !== group ||
+          token.cross_group_retry
+        ) {
           await this.request(source, "/api/token/", "PUT", {
             ...token,
             model_limits_enabled: true,
             model_limits: c.models.join(","),
+            group,
+            cross_group_retry: false,
           });
           this.store.put("identity", {
             ...old,
@@ -816,6 +1040,7 @@ export class Gateways {
     this.store.put("identity", {
       id: identityId,
       channelId: c.id,
+      sourceId: source.id,
       application: identity,
       tokenId: token.id,
       credentialId,
