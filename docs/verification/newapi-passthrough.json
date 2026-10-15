@@ -1,0 +1,47 @@
+{
+  "checked_at": "2026-10-15T03:26:24.203387+00:00",
+  "scope": "deployed New API image in an isolated container; local stub only",
+  "default_anthropic": {
+    "status": 200,
+    "body_exact": false,
+    "unknown_field_retained": false,
+    "user_agent_retained": true,
+    "client_headers_retained": false,
+    "upstream_auth_replaced": true,
+    "path": "/v1/messages?beta=true",
+    "stream_returned": null
+  },
+  "passthrough_anthropic": {
+    "status": 200,
+    "body_exact": true,
+    "unknown_field_retained": true,
+    "user_agent_retained": true,
+    "client_headers_retained": true,
+    "upstream_auth_replaced": true,
+    "path": "/v1/messages?beta=true",
+    "stream_returned": null
+  },
+  "passthrough_anthropic_stream": {
+    "status": 200,
+    "body_exact": true,
+    "unknown_field_retained": true,
+    "user_agent_retained": true,
+    "client_headers_retained": true,
+    "upstream_auth_replaced": true,
+    "path": "/v1/messages?beta=true",
+    "stream_returned": true
+  },
+  "passthrough_responses": {
+    "status": 200,
+    "body_exact": true,
+    "unknown_field_retained": true,
+    "user_agent_retained": true,
+    "client_headers_retained": true,
+    "upstream_auth_replaced": true,
+    "path": "/v1/responses",
+    "stream_returned": null
+  },
+  "upstream_request_count": 4,
+  "passed": true,
+  "isolated_resources_removed": true
+}

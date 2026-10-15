@@ -62,7 +62,7 @@ New API 的全局自动测试实际为每分钟开启。三个已明确归为 RP
 
 Magpie、Claude Code、Codex、OpenCode、Hermes Chat/Cron 的配置生成已实现。Magpie 使用协议 URL 字段，Hermes 使用原生 providers 配置；Chat/Cron 分开身份。配置生成与“人工确认真实任务成功”分开保存。未对用户所有客户端逐一执行真实任务。
 
-多设备自动分发和逐客户端生效回执尚未实现。2026-10-15 已补充 [同步设计](design/client-config-sync.md)：复用 Magpie 原生客户端适配，增加独立配置源；原生 WebDAV 继续用于个人配置。现有 Magpie 导出还需修正 `baseAPI` 枚举、Anthropic 地址、认证及原客户端标识映射，不能将当前导出视为完整兼容验收。
+2026-10-15 复核后的 [多客户端设计](design/client-config-sync.md) 改为复用 Magpie 原生同步与客户端适配，撤销新增独立配置源和设备发布/回执服务。fn 的无头 Magpie/Remote Magpie 已有集中供应商、设备密钥与选路能力；当前优先沿用 New API/CPA。使用现有 New API 镜像的隔离实例完成 4 个合成请求案例，Anthropic/Responses 正文和客户端头透传、Anthropic SSE 通过；未请求公益站，未将客户端限定连接批量迁入网关。回执见 [透传验证](verification/newapi-passthrough.json)。现有 Magpie 导出仍需修正 `baseAPI` 枚举、Anthropic 根地址和认证映射；Magpie 对 Claude Code 及远程会话已有专门的客户端特征保留路径，不能只以 `passUserAgent` 开关概括。
 
 ## 实际验证
 

@@ -83,7 +83,7 @@ CPA 使用当前部署的 Manager `/v0/management/monitoring/analytics` 持久�
 
 client_bound 保留客户端、认证方式、协议、地址、headers 和模型配置；借鉴 CC Switch 请求头校验，认证及传输头由连接机制管理，其他覆盖字段名称大小写统一、值为合法字符串。Magpie 导出使用现有 provider 字段。Claude Code 导出移除地址末尾的 `/v1`，避免原生 SDK 再次拼接为 `/v1/v1/messages`；真实 CLI 验证保留认证与自定义请求头并访问 `/v1/messages`。配置生成与客户端真实验证分开；没有请求记录显示未采集。
 
-限定客户端连接可由原客户端经本机 Magpie 使用，保留原客户端归属。多设备同步采用中心独立配置源，复用 Magpie 的客户端适配；个人配置和 Library 保留原生同步。配置源、设备分配与生效回执尚未实现，原导出字段的修正及完整方案见 [多设备与客户端同步设计](client-config-sync.md)。
+限定客户端连接可经同协议的 fn 透传入口或本机 Magpie 使用，保留原客户端归属。多客户端配置复用 Magpie 原生适配与 WebDAV；集中使用 Magpie 的账号和路由时可直接使用无头 Hub/Remote Magpie。当前优先复用已有 New API 透传，不新增中心配置源或设备控制服务。隔离验证、原导出字段修正和同步规则见 [多客户端配置设计](client-config-sync.md)。
 
 ## RP 联动
 
