@@ -1,5 +1,5 @@
 {
-  "checkedAt": "2026-10-15T05:23:00.433716+00:00",
+  "checkedAt": "2026-10-15T05:29:42.179417+00:00",
   "center": "http://192.168.31.201:18321",
   "exports": [
     {
@@ -50,14 +50,14 @@
     {
       "id": "new-api",
       "name": "New API",
-      "last": "2026-10-15T05:23:01.198Z",
+      "last": "2026-10-15T05:29:42.576Z",
       "error": null,
       "coverage": "仅反映网关已记录的调用；部分失败未记录"
     },
     {
       "id": "cpa",
       "name": "CPA Manager Plus",
-      "last": "2026-10-15T05:23:04.032Z",
+      "last": "2026-10-15T05:29:44.701Z",
       "error": null,
       "coverage": "只读取 Manager 已存记录；账号反代不计入"
     }
@@ -85,5 +85,142 @@
     }
   ],
   "channelCount": 184,
-  "rpChannelCount": 40
+  "rpChannelCount": 40,
+  "nativeReadback": {
+    "channels": [
+      {
+        "id": 79,
+        "name": "AnyRouter",
+        "type": 14,
+        "status": 1,
+        "autoBan": 0,
+        "group": "arc-claude-code-anthropic",
+        "testTime": 0,
+        "bodyPassthrough": true,
+        "headerPassthrough": true,
+        "upstreamBearerFromChannelKey": true
+      },
+      {
+        "id": 186,
+        "name": "AgentRouter",
+        "type": 14,
+        "status": 1,
+        "autoBan": 0,
+        "group": "arc-claude-code-anthropic",
+        "testTime": 0,
+        "bodyPassthrough": true,
+        "headerPassthrough": true,
+        "upstreamBearerFromChannelKey": true
+      },
+      {
+        "id": 65,
+        "name": "image-萌图#每日刷新",
+        "type": 1,
+        "status": 2,
+        "autoBan": 1,
+        "group": "default",
+        "testTime": 1786199143,
+        "bodyPassthrough": false,
+        "headerPassthrough": false,
+        "upstreamBearerFromChannelKey": false
+      },
+      {
+        "id": 84,
+        "name": "sync-gensoukyou.xyz",
+        "type": 1,
+        "status": 2,
+        "autoBan": 1,
+        "group": "default",
+        "testTime": 0,
+        "bodyPassthrough": false,
+        "headerPassthrough": false,
+        "upstreamBearerFromChannelKey": false
+      },
+      {
+        "id": 89,
+        "name": "sync-share.inliver.com",
+        "type": 1,
+        "status": 2,
+        "autoBan": 1,
+        "group": "default",
+        "testTime": 0,
+        "bodyPassthrough": false,
+        "headerPassthrough": false,
+        "upstreamBearerFromChannelKey": false
+      }
+    ],
+    "groupRatioPersisted": true,
+    "automaticTestMode": "passive_recovery",
+    "clients": [
+      {
+        "name": "AgentRouter",
+        "client": "Claude Code",
+        "apply": "synced",
+        "gatewayAllowed": true,
+        "modelCount": 1,
+        "hasKey": true
+      },
+      {
+        "name": "jianzhile.vip",
+        "client": "Codex",
+        "apply": "saved",
+        "gatewayAllowed": false,
+        "modelCount": 0,
+        "hasKey": false
+      },
+      {
+        "name": "runanytime.hxi.me",
+        "client": "Codex",
+        "apply": "saved",
+        "modelCount": 0,
+        "hasKey": true
+      },
+      {
+        "name": "AnyRouter",
+        "client": "Claude Code",
+        "apply": "synced",
+        "gatewayAllowed": true,
+        "modelCount": 6,
+        "hasKey": true
+      }
+    ],
+    "identityCount": 2
+  },
+  "browserChecks": {
+    "failureFilter": {
+      "records": 72,
+      "rowsPerPage": 30,
+      "allVisibleRowsFailed": true
+    },
+    "pagination": {
+      "secondPage": true,
+      "rows": 30
+    },
+    "responsive390": {
+      "viewportWidth": 390,
+      "documentScrollWidth": 375,
+      "horizontalOverflowConfinedToTables": true
+    },
+    "exportForm": {
+      "applicationDeviceInput": true,
+      "modelSelection": true,
+      "fnBaseUrl": "http://192.168.31.201:3000",
+      "model": "claude-sonnet-4-5-20250929[1m]",
+      "hasInferenceKey": true
+    }
+  },
+  "verification": {
+    "testsPassed": 19,
+    "buildPassed": true,
+    "clientDefaultsModified": false,
+    "allClientRealTasksVerified": false,
+    "rpDirectCallsCollected": false
+  },
+  "deployment": {
+    "image": "ai-resource-center:20261015-aggregation",
+    "imageDigest": "sha256:faf1d45f73faf142624cf8051108f915ddc0454b4b966aa6a9241703c74e815e",
+    "health": "healthy",
+    "backup": "/vol2/1000/Docker/ai-resource-center/backups/20261015-aggregation-131454",
+    "codeCheckpoint": "99eeee7"
+  }
 }
