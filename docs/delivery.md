@@ -79,6 +79,8 @@ Magpie、Claude Code、Codex、OpenCode、Hermes Chat/Cron 的配置生成已实
 
 原始脱敏回执在 [verification](verification/)，设计截图在 [design/evidence](design/evidence/)。隔离实例、合成站点和专用验收凭据已清理；New API 自身产生的审计日志保留。
 
+2026-10-15 北京时间 11:45–11:50，追加 [AnyRouter / AgentRouter 真实 Claude Code 对照](verification/router-client-features.md)：5 组网关特征比较通过；AnyRouter 当前 429/Claude 供应不足，AgentRouter 当前 402 资源池耗尽。请求正文和客户端头保留已验证；两站成功生成未验证，未修改生产渠道或客户端默认配置。
+
 ## 运维与回退
 
 fn 源码目录：`/vol1/1000/Code/.worktree/ai-resource-center/ai-resource-center`。持久卷：`/vol2/1000/Docker/ai-resource-center/data`。启动、日志和健康检查：

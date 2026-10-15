@@ -1,0 +1,332 @@
+{
+  "checked_at": "2026-10-15T03:45:24.450967+00:00",
+  "completed_at": "2026-10-15T03:52:45.551372+00:00",
+  "client": "2.1.299 (Claude Code)",
+  "gateway_version": "v1.0.0-rc.44 (same image as fn production)",
+  "scope": "Real Claude Code via SSH-forwarded fn observation point. Direct and gateway paths share fn egress. Isolated New API calls the observation point before the authorized upstream.",
+  "credential_sources": {
+    "anyrouter": "Existing local Magpie API key",
+    "agentrouter": "Existing inference token read with saved All API Hub account credentials"
+  },
+  "compared_header_names": [
+    "accept",
+    "anthropic-beta",
+    "anthropic-dangerous-direct-browser-access",
+    "anthropic-version",
+    "content-type",
+    "user-agent",
+    "x-app",
+    "x-claude-code-session-id",
+    "x-stainless-arch",
+    "x-stainless-lang",
+    "x-stainless-os",
+    "x-stainless-package-version",
+    "x-stainless-retry-count",
+    "x-stainless-runtime",
+    "x-stainless-runtime-version",
+    "x-stainless-timeout"
+  ],
+  "auth_handling": "Direct uses upstream Bearer token; New API replaces its inference credential with upstream Bearer plus x-api-key. Authentication and hop-by-hop headers excluded from feature equality.",
+  "runs": [
+    {
+      "purpose": "原有模型基线",
+      "checked_at": "2026-10-15T03:45:24.450967+00:00",
+      "cli_context_1m_requested": false,
+      "cases": {
+        "anyrouter-direct": {
+          "public_requests": 1,
+          "incoming_attempts": 1,
+          "created_at": "2026-10-15T03:45:35.762355+00:00",
+          "upstream_path": "/v1/messages?beta=true",
+          "upstream_status": 400,
+          "elapsed_ms": 1184,
+          "error_summary": "1m 上下文已经全量可用，请启用 1m 上下文后重试",
+          "body_exact": true,
+          "user_agent": "claude-cli/2.1.299 (external, sdk-cli)",
+          "user_agent_retained": true,
+          "client_headers_retained": true,
+          "changed_header_names": [],
+          "model": "claude-sonnet-4-5-20250929",
+          "upstream_auth": {
+            "bearer": true,
+            "api_key": false
+          },
+          "client_exit_code": 1,
+          "client_success": false,
+          "client_output": null,
+          "stop_reason": null,
+          "client_elapsed_ms": 2119
+        },
+        "anyrouter-gateway": {
+          "public_requests": 1,
+          "incoming_attempts": 1,
+          "created_at": "2026-10-15T03:45:37.576825+00:00",
+          "upstream_path": "/v1/messages?beta=true",
+          "upstream_status": 400,
+          "elapsed_ms": 1170,
+          "error_summary": "1m 上下文已经全量可用，请启用 1m 上下文后重试",
+          "gateway_status": 400,
+          "body_exact": true,
+          "user_agent": "claude-cli/2.1.299 (external, sdk-cli)",
+          "user_agent_retained": true,
+          "client_headers_retained": true,
+          "changed_header_names": [],
+          "model": "claude-sonnet-4-5-20250929",
+          "upstream_auth": {
+            "bearer": true,
+            "api_key": true
+          },
+          "client_exit_code": 1,
+          "client_success": false,
+          "client_output": null,
+          "stop_reason": null,
+          "client_elapsed_ms": 2155
+        },
+        "agentrouter-direct": {
+          "public_requests": 1,
+          "incoming_attempts": 1,
+          "created_at": "2026-10-15T03:45:39.742170+00:00",
+          "upstream_path": "/v1/messages?beta=true",
+          "upstream_status": 402,
+          "elapsed_ms": 1334,
+          "error_summary": "Budget pool quota has been exhausted. Please ask an administrator to increase the limit or select another budget pool. (request id: 20261015114540865785398r82k2bQoF34Ex)",
+          "body_exact": true,
+          "user_agent": "claude-cli/2.1.299 (external, sdk-cli)",
+          "user_agent_retained": true,
+          "client_headers_retained": true,
+          "changed_header_names": [],
+          "model": "claude-opus-5",
+          "upstream_auth": {
+            "bearer": true,
+            "api_key": false
+          },
+          "client_exit_code": 1,
+          "client_success": false,
+          "client_output": null,
+          "stop_reason": null,
+          "client_elapsed_ms": 2109
+        },
+        "agentrouter-gateway": {
+          "public_requests": 1,
+          "incoming_attempts": 1,
+          "created_at": "2026-10-15T03:45:41.849721+00:00",
+          "upstream_path": "/v1/messages?beta=true",
+          "upstream_status": 402,
+          "elapsed_ms": 1202,
+          "error_summary": "Budget pool quota has been exhausted. Please ask an administrator to increase the limit or select another budget pool. (request id: 20261015114542864413208g94tpRaoD8YRj)",
+          "gateway_status": 402,
+          "body_exact": true,
+          "user_agent": "claude-cli/2.1.299 (external, sdk-cli)",
+          "user_agent_retained": true,
+          "client_headers_retained": true,
+          "changed_header_names": [],
+          "model": "claude-opus-5",
+          "upstream_auth": {
+            "bearer": true,
+            "api_key": true
+          },
+          "client_exit_code": 1,
+          "client_success": false,
+          "client_output": null,
+          "stop_reason": null,
+          "client_elapsed_ms": 2120
+        }
+      }
+    },
+    {
+      "purpose": "Sonnet 4.5 原生 1M",
+      "checked_at": "2026-10-15T03:46:43.107497+00:00",
+      "cli_context_1m_requested": true,
+      "cases": {
+        "anyrouter-direct": {
+          "public_requests": 1,
+          "incoming_attempts": 3,
+          "created_at": "2026-10-15T03:46:54.029987+00:00",
+          "upstream_path": "/v1/messages?beta=true",
+          "upstream_status": 429,
+          "elapsed_ms": 2728,
+          "error_summary": "Service Unavailable",
+          "cached_retries": 2,
+          "body_exact": true,
+          "user_agent": "claude-cli/2.1.299 (external, sdk-cli)",
+          "user_agent_retained": true,
+          "client_headers_retained": true,
+          "changed_header_names": [],
+          "model": "claude-sonnet-4-5-20250929",
+          "upstream_auth": {
+            "bearer": true,
+            "api_key": false
+          },
+          "client_exit_code": 143,
+          "client_success": false,
+          "client_output": null,
+          "stop_reason": "upstream failure observed; stopped client retries",
+          "client_elapsed_ms": 6637
+        },
+        "anyrouter-gateway": {
+          "public_requests": 1,
+          "incoming_attempts": 4,
+          "created_at": "2026-10-15T03:47:00.350294+00:00",
+          "upstream_path": "/v1/messages?beta=true",
+          "upstream_status": 429,
+          "elapsed_ms": 2645,
+          "error_summary": "Service Unavailable",
+          "gateway_status": 429,
+          "cached_retries": 3,
+          "body_exact": true,
+          "user_agent": "claude-cli/2.1.299 (external, sdk-cli)",
+          "user_agent_retained": true,
+          "client_headers_retained": true,
+          "changed_header_names": [],
+          "model": "claude-sonnet-4-5-20250929",
+          "upstream_auth": {
+            "bearer": true,
+            "api_key": true
+          },
+          "client_exit_code": 143,
+          "client_success": false,
+          "client_output": null,
+          "stop_reason": "upstream failure observed; stopped client retries",
+          "client_elapsed_ms": 7664
+        }
+      }
+    },
+    {
+      "purpose": "现有 Opus 5.5 配置",
+      "checked_at": "2026-10-15T03:48:08.752052+00:00",
+      "cli_context_1m_requested": true,
+      "cases": {
+        "anyrouter-direct": {
+          "public_requests": 1,
+          "incoming_attempts": 2,
+          "created_at": "2026-10-15T03:48:18.537246+00:00",
+          "upstream_path": "/v1/messages?beta=true",
+          "upstream_status": 400,
+          "elapsed_ms": 1061,
+          "error_summary": "由于 claude 模型供应难以保证，上线 gpt-6-astra-cc-format 模型，支持 messages 格式，通过 claude --model 'gpt-6-astra-cc-format[1m]' 使用该模型",
+          "cached_retries": 1,
+          "body_exact": true,
+          "user_agent": "claude-cli/2.1.299 (external, sdk-cli)",
+          "user_agent_retained": true,
+          "client_headers_retained": true,
+          "changed_header_names": [],
+          "model": "claude-opus-5-5",
+          "upstream_auth": {
+            "bearer": true,
+            "api_key": false
+          },
+          "client_exit_code": 1,
+          "client_success": false,
+          "client_output": null,
+          "stop_reason": null,
+          "client_elapsed_ms": 2298
+        },
+        "anyrouter-gateway": {
+          "public_requests": 1,
+          "incoming_attempts": 2,
+          "created_at": "2026-10-15T03:48:20.474059+00:00",
+          "upstream_path": "/v1/messages?beta=true",
+          "upstream_status": 400,
+          "elapsed_ms": 1097,
+          "error_summary": "由于 claude 模型供应难以保证，上线 gpt-6-astra-cc-format 模型，支持 messages 格式，通过 claude --model 'gpt-6-astra-cc-format[1m]' 使用该模型",
+          "gateway_status": 400,
+          "cached_retries": 1,
+          "body_exact": true,
+          "user_agent": "claude-cli/2.1.299 (external, sdk-cli)",
+          "user_agent_retained": true,
+          "client_headers_retained": true,
+          "changed_header_names": [],
+          "model": "claude-opus-5-5",
+          "upstream_auth": {
+            "bearer": true,
+            "api_key": true
+          },
+          "client_exit_code": 1,
+          "client_success": false,
+          "client_output": null,
+          "stop_reason": null,
+          "client_elapsed_ms": 2395
+        }
+      }
+    },
+    {
+      "purpose": "站点提示的 Messages 模型",
+      "checked_at": "2026-10-15T03:49:31.751845+00:00",
+      "cli_context_1m_requested": true,
+      "cases": {
+        "anyrouter-direct": {
+          "public_requests": 1,
+          "incoming_attempts": 4,
+          "created_at": "2026-10-15T03:49:40.584253+00:00",
+          "upstream_path": "/v1/messages?beta=true",
+          "upstream_status": 429,
+          "elapsed_ms": 3197,
+          "error_summary": "Service Unavailable",
+          "cached_retries": 3,
+          "body_exact": true,
+          "user_agent": "claude-cli/2.1.299 (external, sdk-cli)",
+          "user_agent_retained": true,
+          "client_headers_retained": true,
+          "changed_header_names": [],
+          "model": "gpt-6-astra-cc-format",
+          "upstream_auth": {
+            "bearer": true,
+            "api_key": false
+          },
+          "client_exit_code": 143,
+          "client_success": false,
+          "client_output": null,
+          "stop_reason": "upstream failure observed; stopped client retries",
+          "client_elapsed_ms": 8008
+        },
+        "anyrouter-gateway": {
+          "public_requests": 1,
+          "incoming_attempts": 3,
+          "created_at": "2026-10-15T03:49:48.310608+00:00",
+          "upstream_path": "/v1/messages?beta=true",
+          "upstream_status": 429,
+          "elapsed_ms": 3562,
+          "error_summary": "Service Unavailable",
+          "gateway_status": 429,
+          "cached_retries": 2,
+          "body_exact": true,
+          "user_agent": "claude-cli/2.1.299 (external, sdk-cli)",
+          "user_agent_retained": true,
+          "client_headers_retained": true,
+          "changed_header_names": [],
+          "model": "gpt-6-astra-cc-format",
+          "upstream_auth": {
+            "bearer": true,
+            "api_key": true
+          },
+          "client_exit_code": 143,
+          "client_success": false,
+          "client_output": null,
+          "stop_reason": "upstream failure observed; stopped client retries",
+          "client_elapsed_ms": 7556
+        }
+      }
+    }
+  ],
+  "actual_upstream_inference_requests": 10,
+  "client_retry_policy": "Each case made one public inference request; repeated CLI requests received the already observed response. Clients were stopped after a resource failure to avoid further requests.",
+  "conclusions": {
+    "anyrouter": {
+      "feature_preservation_verified": true,
+      "generation_success_verified": false,
+      "latest_status": 429,
+      "latest_error": "Service Unavailable",
+      "requirement": "Native CLI [1m] context",
+      "model_notes": "Sonnet 4.5 with 1m: 429. Opus 5.5: service reports Claude supply shortage and offers gpt-6-astra-cc-format. Offered model with 1m: 429."
+    },
+    "agentrouter": {
+      "feature_preservation_verified": true,
+      "generation_success_verified": false,
+      "latest_status": 402,
+      "latest_error": "Budget pool quota has been exhausted",
+      "model": "claude-opus-5"
+    }
+  },
+  "isolated_resources_removed": true,
+  "production_gateway_and_default_client_config_modified": false
+}

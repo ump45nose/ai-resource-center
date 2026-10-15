@@ -66,6 +66,8 @@ New API v1.0.0-rc.44 的渠道配置可用：
 
 HTTP 代理保留的是 HTTP 请求特征；上游看到的出口 IP 和 TLS 连接来自 fn。客户端限制依赖哪些特征，最终以原客户端经该入口的真实任务结果确认。
 
+2026-10-15 已补做 [AnyRouter / AgentRouter 真实 Claude Code 对照](../verification/router-client-features.md)。同 fn 出口的直连和隔离 New API 各组返回相同状态，网关前后正文及客户端特征头一致。AnyRouter 启用原生 1M、换模型后仍返回 429 或供应不足；AgentRouter 返回资源池耗尽 402。请求特征保留已验证，两站成功生成仍待资源恢复。
+
 ## 原生同步如何配置
 
 各设备已安装 Magpie 时，继续使用原生 WebDAV 同步，不新增常驻同步代理。
