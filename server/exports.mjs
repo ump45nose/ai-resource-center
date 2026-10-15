@@ -9,7 +9,9 @@ export function clientConfig(c, client, key, model = c.models[0]) {
     return JSON.stringify(
       {
         env: {
-          ANTHROPIC_BASE_URL: c.baseUrl,
+          ANTHROPIC_BASE_URL: c.baseUrl
+            .replace(/\/v1\/?$/, "")
+            .replace(/\/$/, ""),
           ...(c.authType === "api_key"
             ? { ANTHROPIC_API_KEY: key }
             : { ANTHROPIC_AUTH_TOKEN: key }),

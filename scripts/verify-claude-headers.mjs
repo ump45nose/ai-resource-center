@@ -22,6 +22,7 @@ const server = createServer(async (req, res) => {
     return;
   }
   recorded.push({
+    path: req.url,
     client: req.headers["x-resource-center"],
     hasAuthentication: !!(
       req.headers.authorization || req.headers["x-api-key"]
@@ -100,7 +101,7 @@ const config = JSON.parse(
     {
       name: "CLI 验证",
       protocol: "Anthropic",
-      baseUrl: `http://127.0.0.1:${port}`,
+      baseUrl: `http://127.0.0.1:${port}/v1`,
       models: ["claude-sonnet-4-6"],
       headers: [{ name: "x-resource-center", value: "header-verification" }],
     },
@@ -165,7 +166,10 @@ if (
   stdout.trim() !== "ok" ||
   !recorded.length ||
   recorded.some(
-    (x) => x.client !== "header-verification" || !x.hasAuthentication,
+    (x) =>
+      x.client !== "header-verification" ||
+      !x.hasAuthentication ||
+      x.path.split("?")[0] !== "/v1/messages",
   )
 )
   process.exitCode = 1;

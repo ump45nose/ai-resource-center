@@ -81,7 +81,7 @@ CPA 使用当前部署的 Manager `/v0/management/monitoring/analytics` 持久�
 
 评估是配置准备与结果登记，不启动 Agent。New API 使用管理员所属的专用推理 token 加固定渠道标识，当前版本 single_attempt，结束停用专用 token。网关管理 token 不导出。固定能力缺失直接报错，不偷偷切换上游。
 
-client_bound 保留客户端、认证方式、协议、地址、headers 和模型配置；借鉴 CC Switch 请求头校验，认证及传输头由连接机制管理，其他覆盖字段名称大小写统一、值为合法字符串。Magpie 导出使用现有 provider 字段。配置生成与客户端真实验证分开；没有请求记录显示未采集。
+client_bound 保留客户端、认证方式、协议、地址、headers 和模型配置；借鉴 CC Switch 请求头校验，认证及传输头由连接机制管理，其他覆盖字段名称大小写统一、值为合法字符串。Magpie 导出使用现有 provider 字段。Claude Code 导出移除地址末尾的 `/v1`，避免原生 SDK 再次拼接为 `/v1/v1/messages`；真实 CLI 验证保留认证与自定义请求头并访问 `/v1/messages`。配置生成与客户端真实验证分开；没有请求记录显示未采集。
 
 ## RP 联动
 

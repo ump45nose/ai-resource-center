@@ -3,10 +3,10 @@
   "accounts": 186,
   "channels": 185,
   "categories": {
-    "general": 130,
+    "general": 129,
     "media": 11,
     "rp": 40,
-    "client": 4
+    "client": 5
   },
   "received": {
     "allApiHub": "2026-10-15T02:28:41.155Z",
@@ -34,5 +34,5 @@
   "productionRpBinding": "awaiting user profile selection",
   "pendingAssociations": 1,
   "publicRpProbes": 0,
-  "image": "sha256:3970041b922ba4a0b72513109d0e966b7cc44da24811533722d0e3c52c5e6520"
+  "image": "sha256:7569402ff89e7b17c0b52f2aa56f1dec0f4442d6468511f2805b28845ad8eec6"
 }
