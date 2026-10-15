@@ -12,6 +12,7 @@ import { rulesSchema, dayKey, nextReset } from "./domain.mjs";
 import { parseFile, rowSchema } from "./imports.mjs";
 import { clientConfig } from "./exports.mjs";
 import { callReport } from "./calls.mjs";
+import { ingestRpCalls } from "./rp-calls.mjs";
 
 export async function createApp({
   dir,
@@ -93,6 +94,9 @@ export async function createApp({
   });
   app.get("/api/health", async () => ({ status: "ok" }));
   app.get("/api/v1/calls", async (req) => callReport(store, req.query));
+  app.post("/api/v1/rp/calls", async (req) =>
+    ingestRpCalls(center, gateways, req.centerAuth, req.body),
+  );
   app.post("/api/v1/session", async (req, reply) => {
     const { password } = z.object({ password: z.string() }).parse(req.body),
       p = store.setting("password");

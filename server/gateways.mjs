@@ -501,8 +501,8 @@ export class Gateways {
       .get(source, String(id));
     this.store.db
       .prepare(
-        `INSERT INTO calls(source,source_id,channel_id,model,occurred_at,result,error_type,latency,ttft,request_id,token_id,stream_status,summary,upstream_channel,application,input_tokens,output_tokens,is_stream,group_name)
-         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(source,source_id) DO UPDATE SET channel_id=excluded.channel_id,result=excluded.result,error_type=excluded.error_type,summary=excluded.summary,latency=excluded.latency,ttft=excluded.ttft,stream_status=excluded.stream_status,request_id=COALESCE(excluded.request_id,calls.request_id),token_id=COALESCE(excluded.token_id,calls.token_id),application=excluded.application,input_tokens=excluded.input_tokens,output_tokens=excluded.output_tokens,is_stream=excluded.is_stream,group_name=excluded.group_name,upstream_channel=excluded.upstream_channel`,
+        `INSERT INTO calls(source,source_id,channel_id,model,occurred_at,result,error_type,latency,ttft,request_id,token_id,stream_status,summary,upstream_channel,application,input_tokens,output_tokens,is_stream,group_name,token_basis,origin)
+         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(source,source_id) DO UPDATE SET channel_id=excluded.channel_id,result=excluded.result,error_type=excluded.error_type,summary=excluded.summary,latency=excluded.latency,ttft=excluded.ttft,stream_status=excluded.stream_status,request_id=COALESCE(excluded.request_id,calls.request_id),token_id=COALESCE(excluded.token_id,calls.token_id),application=excluded.application,input_tokens=excluded.input_tokens,output_tokens=excluded.output_tokens,is_stream=excluded.is_stream,group_name=excluded.group_name,upstream_channel=excluded.upstream_channel,token_basis=excluded.token_basis,origin=excluded.origin`,
       )
       .run(
         source,
@@ -528,13 +528,19 @@ export class Gateways {
         Number.isFinite(detail.outputTokens) ? detail.outputTokens : null,
         typeof detail.isStream === "boolean" ? Number(detail.isStream) : null,
         detail.group || null,
+        detail.tokenBasis ||
+          (Number.isFinite(detail.inputTokens) ||
+          Number.isFinite(detail.outputTokens)
+            ? "provider"
+            : null),
+        detail.origin || null,
       );
     if (!c) return;
     const current = this.store.get("channel", c.id);
     if (
       (!previous || previous.result !== result) &&
       current &&
-      c.models.includes(model) &&
+      (c.category === "rp" || c.models.includes(model)) &&
       (!current.callObservedAt || time >= current.callObservedAt)
     ) {
       const reasons = {

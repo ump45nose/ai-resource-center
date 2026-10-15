@@ -6,15 +6,19 @@ const querySchema = z.object({
   model: z.string().optional(),
   application: z.string().optional(),
   source: z.string().optional(),
-  result: z.enum(["success", "failure", "pending"]).optional(),
+  origin: z.enum(["live", "history", "all"]).default("live"),
+  result: z
+    .enum(["success", "failure", "pending", "cancelled", "unknown"])
+    .optional(),
   groupBy: z.enum(["channel", "model", "application"]).default("channel"),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(30),
 });
 const metrics = `COUNT(*) AS total, SUM(result='success') AS success, SUM(result='failure') AS failure,
- SUM(result='pending') AS pending, AVG(CASE WHEN result='success' THEN latency END) AS latency,
- AVG(CASE WHEN result='success' AND ttft>0 THEN ttft END) AS ttft,
- SUM(input_tokens) AS inputTokens, SUM(output_tokens) AS outputTokens,
+ SUM(result='pending') AS pending, SUM(result='cancelled') AS cancelled, SUM(result='unknown') AS unknown, AVG(latency) AS latency,
+ AVG(CASE WHEN ttft>0 THEN ttft END) AS ttft,
+ SUM(CASE WHEN token_basis='local_estimate' THEN NULL ELSE input_tokens END) AS inputTokens, SUM(CASE WHEN token_basis='local_estimate' THEN NULL ELSE output_tokens END) AS outputTokens,
+ SUM(CASE WHEN token_basis='local_estimate' THEN output_tokens END) AS estimatedOutputTokens,
  SUM(stream_status='disconnected') AS disconnected`;
 
 export function callReport(store, raw) {
@@ -42,6 +46,9 @@ export function callReport(store, raw) {
       if (q[name] !== "__unknown") args.push(q[name]);
     }
   }
+  if (q.origin === "history") terms.push("origin='history'");
+  else if (q.origin === "live")
+    terms.push("(origin IS NULL OR origin!='history')");
   const where = terms.join(" AND ");
   const summary = store.db
     .prepare(
@@ -80,7 +87,7 @@ export function callReport(store, raw) {
     page: q.page,
     limit: q.limit,
     coverage: (store.setting("sources") || [])
-      .filter((s) => ["newapi", "cpa"].includes(s.kind))
+      .filter((s) => ["newapi", "cpa", "sillytavern"].includes(s.kind))
       .map(({ id, name, last, error, coverage }) => ({
         id,
         name,

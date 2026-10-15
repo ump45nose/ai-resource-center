@@ -42,7 +42,7 @@ function RpNote({
 }
 
 export default function RpView() {
-  const { s, act, toast } = useStore();
+  const { s, act, toast, go } = useStore();
   const [edit, setEdit] = useState<string | null>(null),
     [conf, setConf] = useState<string | null>(null),
     [drag, setDrag] = useState<string | null>(null);
@@ -78,6 +78,12 @@ export default function RpView() {
 
   return (
     <div className="grid gap-5 xl:grid-cols-[1fr_360px]">
+      <div className="text-sm text-zinc-600 xl:col-span-2">
+        真实调用最近上报：{s.received.sillyTavernCalls || "尚未收到"}{" "}
+        <Btn size="sm" onClick={() => go("eval")}>
+          查看调用统计
+        </Btn>
+      </div>
       <Section
         title="RP 连接"
         desc={

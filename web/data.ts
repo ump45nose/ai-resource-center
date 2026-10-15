@@ -151,7 +151,11 @@ export interface AppState {
   tmUrl: string;
   today: string;
   demo: boolean;
-  received: { allApiHub?: string; sillyTavern?: string };
+  received: {
+    allApiHub?: string;
+    sillyTavern?: string;
+    sillyTavernCalls?: string;
+  };
 }
 
 export const TODAY = new Intl.DateTimeFormat("en-CA", {

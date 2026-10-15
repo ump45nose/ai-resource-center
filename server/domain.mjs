@@ -206,7 +206,9 @@ export function evaluate(channels, accounts, calls, rules, now = new Date()) {
   for (const c of channels) {
     const a = accounts.find((a) => a.id === c.accountId),
       rows = valid.filter(
-        (x) => x.channel_id === c.id && c.models.includes(x.model),
+        (x) =>
+          x.channel_id === c.id &&
+          (c.category === "rp" || c.models.includes(x.model)),
       );
     const samples = rows.length,
       success = samples

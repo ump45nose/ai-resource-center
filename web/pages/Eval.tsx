@@ -15,7 +15,7 @@ import type { Evaluation } from "../data";
 import { Calls } from "../Calls";
 
 export default function Eval() {
-  const { s, act, toast } = useStore();
+  const { s, act, toast, sub } = useStore();
   const r = s.rules;
   const site = (id: string) => s.sites.find((x) => x.id === id)!;
   const pub = s.channels
@@ -48,7 +48,7 @@ export default function Eval() {
         desc={`默认规则：近 ${r.days} 天 · 至少 ${r.samples} 样本 · 观测成功率 ≥${r.good}% 为优先候选，<${r.warn}% 降级；样本不足保留原路由`}
       />
       <div className="mb-5">
-        <Calls />
+        <Calls key={sub} initialChannel={sub} />
       </div>
       <Section
         title="网关渠道质量与调整"

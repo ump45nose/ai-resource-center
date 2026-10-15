@@ -43,6 +43,8 @@ export class Store {
       output_tokens: "INTEGER",
       is_stream: "INTEGER",
       group_name: "TEXT",
+      token_basis: "TEXT",
+      origin: "TEXT",
     })) {
       if (!columns.has(name))
         this.db.exec(`ALTER TABLE calls ADD COLUMN ${name} ${type}`);

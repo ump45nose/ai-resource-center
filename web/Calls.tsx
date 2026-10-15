@@ -7,6 +7,9 @@ type Metrics = {
   success: number;
   failure: number;
   pending: number;
+  cancelled: number;
+  unknown: number;
+  estimatedOutputTokens: number | null;
   latency: number | null;
   ttft: number | null;
   inputTokens: number | null;
@@ -27,6 +30,8 @@ type Report = {
     ttft: number | null;
     input_tokens: number | null;
     output_tokens: number | null;
+    token_basis: string | null;
+    origin: string | null;
     summary: string | null;
     request_id: string;
     is_stream: number | null;
@@ -45,11 +50,14 @@ const ms = (n: number | null) => (n == null ? "未采集" : `${Math.round(n)} ms
 const num = (n: number | null) => (n == null ? "未采集" : n.toLocaleString());
 const stamp = (v?: string) =>
   v ? new Date(v).toLocaleString("zh-CN", { hour12: false }) : "尚未同步";
-export function Calls() {
+export function Calls({ initialChannel = "" }: { initialChannel?: string }) {
   const { s } = useStore();
   const [filters, setFilters] = useState({
     days: "7",
-    channelId: "",
+    channelId: s.channels.some((c) => c.id === initialChannel)
+      ? initialChannel
+      : "",
+    origin: "live",
     model: "",
     application: "",
     source: "",
@@ -111,9 +119,9 @@ export function Calls() {
   return (
     <Section
       title="调用统计与明细"
-      desc="实际渠道尝试与生成任务；不主动测活，不含任务正文或费用估算"
+      desc="查看真实调用；历史留存单独筛选，本地 Token 估算单列"
     >
-      <div className="grid gap-3 p-4 sm:grid-cols-3 xl:grid-cols-7">
+      <div className="grid gap-3 p-4 sm:grid-cols-3 xl:grid-cols-4">
         {select(
           "days",
           "时间",
@@ -122,17 +130,22 @@ export function Calls() {
             label: `近 ${n} 天`,
           })),
         )}
+        {select("origin", "记录", [
+          { value: "live", label: "实际调用" },
+          { value: "history", label: "历史留存" },
+          { value: "all", label: "全部记录" },
+        ])}
         {select("source", "来源", [
           all("全部来源"),
           ...s.integrations
-            .filter((x) => ["newapi", "cpa"].includes(x.kind))
+            .filter((x) => ["newapi", "cpa", "sillytavern"].includes(x.kind))
             .map((x) => ({ value: x.id, label: x.name })),
         ])}
         {select("channelId", "渠道", [
           all("全部渠道"),
           { value: "__unknown", label: "待关联渠道" },
           ...s.channels
-            .filter((c) => c.category !== "rp" && c.gateway)
+            .filter((c) => c.category === "rp" || c.gateway)
             .map((c) => ({ value: c.id, label: c.name })),
         ])}
         {select("model", "模型", [
@@ -154,7 +167,9 @@ export function Calls() {
           all("全部结果"),
           { value: "success", label: "成功" },
           { value: "failure", label: "失败" },
-          { value: "pending", label: "生成中" },
+          { value: "pending", label: "待终态" },
+          { value: "cancelled", label: "取消" },
+          { value: "unknown", label: "结果未记录" },
         ])}
         {select("groupBy", "汇总维度", [
           { value: "channel", label: "按渠道" },
@@ -175,11 +190,19 @@ export function Calls() {
           已采集 <b>{summary?.total ?? "—"}</b>
         </div>
         <div>
-          成功 {summary?.success ?? 0} · 失败 {summary?.failure ?? 0} · 生成中{" "}
-          {summary?.pending ?? 0}
+          成功 {summary?.success ?? 0} · 失败 {summary?.failure ?? 0} · 待终态{" "}
+          {summary?.pending ?? 0} · 取消 {summary?.cancelled ?? 0} · 结果未记录{" "}
+          {summary?.unknown ?? 0}
         </div>
-        <div>输入 Token {num(summary?.inputTokens ?? null)}</div>
-        <div>输出 Token {num(summary?.outputTokens ?? null)}</div>
+        <div>上游输入 Token {num(summary?.inputTokens ?? null)}</div>
+        <div>
+          上游输出 Token {num(summary?.outputTokens ?? null)}
+          {summary?.estimatedOutputTokens != null && (
+            <div className="text-xs text-zinc-500">
+              酒馆估算输出 {num(summary.estimatedOutputTokens)}
+            </div>
+          )}
+        </div>
       </div>
       <div className="mx-4 mb-4 rounded bg-amber-50 p-3 text-xs text-amber-900">
         {(report?.coverage || []).map((x) => (
@@ -191,7 +214,7 @@ export function Calls() {
         <div>
           待关联渠道 {summary?.unlinked || 0} 条 · 未关联应用{" "}
           {summary?.unknownApplication || 0} 条。应用按推理身份识别；共用 key
-          无法拆分客户端。RP 直连记录未接入。
+          无法拆分客户端。历史记录缺少的站点与终态保留未知。
         </div>
       </div>
       <div className="max-h-80 overflow-auto px-4">
@@ -201,9 +224,9 @@ export function Calls() {
               {[
                 "汇总",
                 "调用",
-                "成功 / 失败 / 生成中",
-                "成功平均耗时",
-                "成功平均首字",
+                "成功 / 失败 / 待终态 / 取消 / 未知",
+                "观测平均耗时",
+                "观测平均首字",
                 "输入 / 输出 Token",
               ].map((x) => (
                 <th key={x} className="p-2 font-normal whitespace-nowrap">
@@ -218,12 +241,18 @@ export function Calls() {
                 <td className="p-2">{x.label}</td>
                 <td className="p-2">{x.total}</td>
                 <td className="p-2">
-                  {x.success} / {x.failure} / {x.pending}
+                  {x.success} / {x.failure} / {x.pending} / {x.cancelled} /{" "}
+                  {x.unknown}
                 </td>
                 <td className="p-2">{ms(x.latency)}</td>
                 <td className="p-2">{ms(x.ttft)}</td>
                 <td className="p-2">
                   {num(x.inputTokens)} / {num(x.outputTokens)}
+                  {x.estimatedOutputTokens != null && (
+                    <div className="text-zinc-500">
+                      酒馆估算输出 {num(x.estimatedOutputTokens)}
+                    </div>
+                  )}
                 </td>
               </tr>
             ))}
@@ -281,7 +310,11 @@ export function Calls() {
                       ? "成功"
                       : x.result === "failure"
                         ? "失败"
-                        : "生成中"}
+                        : x.result === "cancelled"
+                          ? "取消"
+                          : x.result === "unknown"
+                            ? "结果未记录"
+                            : "待终态"}
                   </Badge>
                 </td>
                 <td className="p-2 whitespace-nowrap">
@@ -289,7 +322,9 @@ export function Calls() {
                   <div className="text-zinc-500">{ms(x.ttft)}</div>
                 </td>
                 <td className="p-2">
-                  {num(x.input_tokens)} / {num(x.output_tokens)}
+                  {x.token_basis === "local_estimate"
+                    ? `酒馆估算输出 ${num(x.output_tokens)}`
+                    : `${num(x.input_tokens)} / ${num(x.output_tokens)}`}
                 </td>
                 <td className="p-2 max-w-64 break-words">
                   {x.is_stream === 1
@@ -297,8 +332,20 @@ export function Calls() {
                     : x.is_stream === 0
                       ? "非流式"
                       : "流式未采集"}
-                  {x.stream_status ? ` · ${x.stream_status}` : ""}
-                  {x.summary && <div className="text-red-700">{x.summary}</div>}
+                  {x.stream_status
+                    ? ` · ${{ completed: "完成", disconnected: "中断", failed: "失败", cancelled: "取消", unknown: "终态未确认" }[x.stream_status] || x.stream_status}`
+                    : ""}
+                  {x.summary && (
+                    <div
+                      className={
+                        x.result === "failure"
+                          ? "text-red-700"
+                          : "text-zinc-500"
+                      }
+                    >
+                      {x.summary}
+                    </div>
+                  )}
                   {x.request_id && (
                     <details className="mt-1 text-zinc-500">
                       <summary>请求关联</summary>

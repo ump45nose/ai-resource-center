@@ -286,6 +286,7 @@ export class Center {
       received: {
         allApiHub: this.store.setting("received:all-api-hub"),
         sillyTavern: this.store.setting("received:sillytavern"),
+        sillyTavernCalls: this.store.setting("received:sillytavernCalls"),
       },
       today: dayKey(new Date()),
       pendingImports: this.store.db
