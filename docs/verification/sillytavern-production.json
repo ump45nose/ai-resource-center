@@ -1,0 +1,65 @@
+{
+  "backup": "/vol2/1000/Docker/ai-resource-center/backups/20261015-rp-calls-063344",
+  "users": ["default-user", "yuwk-1"],
+  "historicalBefore": "2026-10-15T06:33:44.599Z",
+  "extensionVersion": "1.1.0",
+  "configuration": [
+    {
+      "user": "default-user",
+      "configured": true,
+      "bindings": 0,
+      "nativeSettingsPreserved": true
+    },
+    {
+      "user": "yuwk-1",
+      "configured": true,
+      "bindings": 0,
+      "nativeSettingsPreserved": true
+    }
+  ],
+  "productionHealthy": true,
+  "historyImport": {
+    "days": 90,
+    "files": 227,
+    "invalidLines": 0,
+    "missingMetadata": 1283,
+    "duplicates": 118,
+    "records": 122,
+    "acknowledged": 122
+  },
+  "historySummary": {
+    "total": 122,
+    "success": 0,
+    "failure": 0,
+    "pending": 0,
+    "cancelled": 0,
+    "unknown": 122,
+    "latency": 144578.25409836066,
+    "ttft": 9064.95081967213,
+    "inputTokens": null,
+    "outputTokens": null,
+    "estimatedOutputTokens": 588281,
+    "disconnected": null,
+    "unlinked": 122,
+    "unknownApplication": 0
+  },
+  "rpLiveSummary": {
+    "total": 0,
+    "success": null,
+    "failure": null,
+    "pending": null,
+    "cancelled": null,
+    "unknown": null,
+    "latency": null,
+    "ttft": null,
+    "inputTokens": null,
+    "outputTokens": null,
+    "estimatedOutputTokens": null,
+    "disconnected": null,
+    "unlinked": null,
+    "unknownApplication": null
+  },
+  "actualLastSevenDays": 161,
+  "historyReplayDuplicated": false,
+  "refreshRequired": true
+}

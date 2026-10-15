@@ -1,0 +1,20 @@
+{
+  "passed": true,
+  "scope": "isolated native SillyTavern and local model only",
+  "nativeRequests": 5,
+  "records": 5,
+  "results": {
+    "success": 3,
+    "failure": 1,
+    "cancelled": 1,
+    "pending": 0
+  },
+  "usage": {
+    "input": 69,
+    "output": 21
+  },
+  "offlineRetained": 1,
+  "recovered": true,
+  "allAssociated": true,
+  "publicUpstreamRequests": 0
+}

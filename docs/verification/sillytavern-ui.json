@@ -1,0 +1,11 @@
+{
+  "passed": true,
+  "historyFilter": true,
+  "pagination": true,
+  "historyExcludedFromLive": true,
+  "viewport": {
+    "width": 390,
+    "scrollWidth": 390
+  },
+  "applicationErrors": []
+}
