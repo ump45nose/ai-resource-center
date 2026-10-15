@@ -502,7 +502,7 @@ export class Gateways {
     this.store.db
       .prepare(
         `INSERT INTO calls(source,source_id,channel_id,model,occurred_at,result,error_type,latency,ttft,request_id,token_id,stream_status,summary,upstream_channel,application,input_tokens,output_tokens,is_stream,group_name)
-         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(source,source_id) DO UPDATE SET channel_id=excluded.channel_id,result=excluded.result,error_type=excluded.error_type,summary=excluded.summary,latency=excluded.latency,ttft=excluded.ttft,application=excluded.application,input_tokens=excluded.input_tokens,output_tokens=excluded.output_tokens,is_stream=excluded.is_stream,group_name=excluded.group_name,upstream_channel=excluded.upstream_channel`,
+         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(source,source_id) DO UPDATE SET channel_id=excluded.channel_id,result=excluded.result,error_type=excluded.error_type,summary=excluded.summary,latency=excluded.latency,ttft=excluded.ttft,stream_status=excluded.stream_status,request_id=COALESCE(excluded.request_id,calls.request_id),token_id=COALESCE(excluded.token_id,calls.token_id),application=excluded.application,input_tokens=excluded.input_tokens,output_tokens=excluded.output_tokens,is_stream=excluded.is_stream,group_name=excluded.group_name,upstream_channel=excluded.upstream_channel`,
       )
       .run(
         source,

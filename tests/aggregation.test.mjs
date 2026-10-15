@@ -273,6 +273,17 @@ test("paged log replay retains unmatched records, attributes by source, and repo
   assert.equal(model.summary.total, 51);
   assert.equal(rt.store.get("channel", c.id).samples, 100); // rate errors affect availability, not long-term quality
   assert.equal((await rt.app.inject({ url: "/api/v1/calls" })).statusCode, 401);
+  logs[99].other = JSON.stringify({
+    frt: 121,
+    stream_status: { status: "ok", response_status: "completed" },
+  });
+  await rt.gateways.sync("n");
+  assert.equal(
+    rt.store.db
+      .prepare("SELECT stream_status FROM calls WHERE source_id='100'")
+      .get().stream_status,
+    "completed",
+  );
 });
 
 test("existing call database upgrades without losing receipts", () => {

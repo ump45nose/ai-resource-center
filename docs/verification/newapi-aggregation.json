@@ -1,0 +1,89 @@
+{
+  "checkedAt": "2026-10-15T05:23:00.433716+00:00",
+  "center": "http://192.168.31.201:18321",
+  "exports": [
+    {
+      "site": "anyrouter",
+      "fnBaseUrl": "http://192.168.31.201:3000",
+      "model": "claude-sonnet-4-5-20250929[1m]",
+      "usesGatewayIdentity": true,
+      "upstreamKeyExported": false
+    },
+    {
+      "site": "agentrouter",
+      "fnBaseUrl": "http://192.168.31.201:3000",
+      "model": "claude-opus-5",
+      "usesGatewayIdentity": true,
+      "upstreamKeyExported": false
+    }
+  ],
+  "publicInferenceRequests": 0,
+  "replay": {
+    "new-api": {
+      "records": 31,
+      "unmatched": 3,
+      "tasks": 0
+    },
+    "cpa": {
+      "records": 121,
+      "unmatched": 0
+    }
+  },
+  "counts": {
+    "beforeReplay": 152,
+    "afterReplay": 152
+  },
+  "summary": {
+    "total": 152,
+    "success": 80,
+    "failure": 72,
+    "pending": 0,
+    "latency": 33693.5,
+    "ttft": 42764.98275862069,
+    "inputTokens": 48099,
+    "outputTokens": 83385,
+    "disconnected": 0,
+    "unlinked": 3,
+    "unknownApplication": 152
+  },
+  "coverage": [
+    {
+      "id": "new-api",
+      "name": "New API",
+      "last": "2026-10-15T05:23:01.198Z",
+      "error": null,
+      "coverage": "仅反映网关已记录的调用；部分失败未记录"
+    },
+    {
+      "id": "cpa",
+      "name": "CPA Manager Plus",
+      "last": "2026-10-15T05:23:04.032Z",
+      "error": null,
+      "coverage": "只读取 Manager 已存记录；账号反代不计入"
+    }
+  ],
+  "bySource": [
+    {
+      "source": "cpa",
+      "records": 121
+    },
+    {
+      "source": "new-api",
+      "records": 31
+    }
+  ],
+  "unlinked": [
+    {
+      "source": "new-api",
+      "originalChannel": "184",
+      "records": 1
+    },
+    {
+      "source": "new-api",
+      "originalChannel": "185",
+      "records": 2
+    }
+  ],
+  "channelCount": 184,
+  "rpChannelCount": 40
+}
