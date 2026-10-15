@@ -545,6 +545,20 @@ export function ConfigDrawer({
   const { s, act, toast } = useStore();
   const c = s.channels.find((x) => x.id === id),
     [text, setText] = useState(preparedContent || "");
+  const [application, setApplication] = useState(client);
+  const [selectedModel, setSelectedModel] = useState(
+    model || c?.models[0] || "",
+  );
+  const generate = async () => {
+    setText("");
+    const r = await act("/exports", {
+      channelId: id,
+      client,
+      model: selectedModel,
+      application: application.trim(),
+    });
+    if (r) setText(r.content);
+  };
   useEffect(() => {
     if (!preparedContent && id)
       void act("/exports", { channelId: id, client, model }).then((r) => {
@@ -557,7 +571,7 @@ export function ConfigDrawer({
       open
       onClose={onClose}
       title={title}
-      sub={`${client} · ${c.protocol} · ${c.baseUrl}`}
+      sub={`${client} · ${c.protocol} · ${s.integrations.find((i) => i.id === c.gateway?.sourceId)?.url || c.baseUrl}`}
       footer={
         <>
           <Btn onClick={onClose}>关闭</Btn>
@@ -581,11 +595,49 @@ export function ConfigDrawer({
       }
     >
       {note && <Badge tone="warn">{note}</Badge>}
+      {!preparedContent && (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field
+            label="应用 / 设备身份"
+            hint="各设备需要分别统计时使用不同名称"
+          >
+            <input
+              className={inputCls}
+              value={application}
+              onChange={(e) => {
+                setApplication(e.target.value);
+                setText("");
+              }}
+            />
+          </Field>
+          <Field label="模型">
+            <select
+              className={inputCls}
+              value={selectedModel}
+              onChange={(e) => {
+                setSelectedModel(e.target.value);
+                setText("");
+              }}
+            >
+              {c.models.map((m) => (
+                <option key={m}>{m}</option>
+              ))}
+            </select>
+          </Field>
+          <Btn
+            disabled={!application.trim() || !selectedModel}
+            onClick={() => void generate()}
+          >
+            生成配置
+          </Btn>
+        </div>
+      )}
       <pre className="mt-3 overflow-x-auto whitespace-pre rounded-md bg-zinc-900 p-4 font-mono text-xs leading-relaxed text-zinc-100">
-        {text || "正在生成配置…"}
+        {text || "请选择模型与应用身份，点击生成配置。"}
       </pre>
       <p className="mt-3 text-xs text-zinc-500">
         生成配置不会启动客户端。请将凭据保存在目标客户端，真实任务成功后登记验证结果。
+        {c.gateway && " 同组同模型由 New API 选路；指定渠道请使用任务评估。"}
       </p>
     </Drawer>
   );

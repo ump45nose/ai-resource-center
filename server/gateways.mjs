@@ -317,12 +317,23 @@ export class Gateways {
         "New API 当前自动测试模式不能排除客户端渠道，请先调整测试范围",
       );
     // Keep all existing groups; only add the isolated client group when absent.
-    for (const key of ["GroupRatio", "UserUsableGroups"]) {
-      const groups = JSON.parse(setting[key] || "{}");
+    const modernRatio = "group_ratio_setting.group_ratio";
+    const ratios = {
+      ...JSON.parse(setting.GroupRatio || "{}"),
+      ...JSON.parse(setting[modernRatio] || "{}"),
+    };
+    const keys = [
+      "GroupRatio",
+      ...(Object.hasOwn(setting, modernRatio) ? [modernRatio] : []),
+      "UserUsableGroups",
+    ];
+    for (const key of keys) {
+      const stored = JSON.parse(setting[key] || "{}");
+      const groups = key === "UserUsableGroups" ? stored : { ...ratios };
       const group = clientGroup(c);
-      if (!Object.hasOwn(groups, group)) {
+      if (!Object.hasOwn(stored, group)) {
         groups[group] =
-          key === "GroupRatio" ? 1 : `${c.client} · ${c.protocol}`;
+          key === "UserUsableGroups" ? `${c.client} · ${c.protocol}` : 1;
         await this.request(source, "/api/option/", "PUT", {
           key,
           value: JSON.stringify(groups),

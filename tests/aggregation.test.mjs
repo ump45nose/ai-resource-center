@@ -46,6 +46,10 @@ test("client aggregation isolates groups, preserves native features, and exports
     creates = 0;
   const options = {
     GroupRatio: JSON.stringify({ default: 1 }),
+    "group_ratio_setting.group_ratio": JSON.stringify({
+      default: 1,
+      team: 0.8,
+    }),
     UserUsableGroups: JSON.stringify({ default: "默认" }),
   };
   const rt = await setup(t, async (url, init) => {
@@ -111,6 +115,13 @@ test("client aggregation isolates groups, preserves native features, and exports
     Authorization: "Bearer {api_key}",
   });
   assert.equal(JSON.parse(options.GroupRatio).default, 1);
+  assert.equal(
+    JSON.parse(options["group_ratio_setting.group_ratio"])[
+      "arc-claude-code-anthropic"
+    ],
+    1,
+  );
+  assert.equal(JSON.parse(options.GroupRatio).team, 0.8);
   assert.equal(saved.mode, "manual");
   const exported = await rt.app.inject({
     method: "POST",

@@ -45,7 +45,7 @@ export default function Eval() {
     <div>
       <PageHead
         title="渠道评价"
-        desc={`默认规则：近 ${r.days} 天 · 至少 ${r.samples} 样本 · 观测成功率 ≥${r.good}% 开放，<${r.warn}% 降级；样本不足保留原路由`}
+        desc={`默认规则：近 ${r.days} 天 · 至少 ${r.samples} 样本 · 观测成功率 ≥${r.good}% 为优先候选，<${r.warn}% 降级；样本不足保留原路由`}
       />
       <div className="mb-5">
         <Calls />
