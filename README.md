@@ -4,6 +4,7 @@
 
 - 管理入口：<http://192.168.31.201:18321>
 - [详细设计](docs/design/ai-resource-center.md)
+- [多设备与客户端同步设计](docs/design/client-config-sync.md)
 - [设计原型](https://www.figma.com/make/HUuM1xwL2LMK6qvoXy5w73/Untitled)
 - [部署、验证与使用说明](docs/delivery.md)
 - [实施记录](docs/plans/2026-10-14-ai-resource-center.md)
