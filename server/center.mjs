@@ -332,6 +332,13 @@ export class Center {
       if (!c.gateway || !c.nativePassthrough) c.mode = "manual";
       c.accessMode = "client_bound";
       c.clientState = "draft";
+      if (!c.gateway) {
+        c.apply = "saved";
+        c.applyMsg =
+          c.gatewayAllowed === false
+            ? "站点禁止网关转发，保留客户端直连"
+            : "已保存；确认 key、原生协议和实际模型名后接入 New API";
+      }
     } else c.accessMode = "gateway";
     if (
       c.mode === "auto" &&

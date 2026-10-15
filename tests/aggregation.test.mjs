@@ -298,3 +298,83 @@ test("existing call database upgrades without losing receipts", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("synchronous image completions and failures are retained, asynchronous submission is not counted as generation success", async (t) => {
+  const at = Math.floor(Date.now() / 1000) - 1;
+  const rt = await setup(t, async (url) => {
+    const path = new URL(url).pathname;
+    if (path === "/api/status") return response({ version: "v1.0.0-rc.44" });
+    if (path === "/api/task")
+      return response({
+        items: [
+          {
+            id: 10,
+            task_id: "job",
+            channel_id: 22,
+            model: "image",
+            status: "SUCCESS",
+            submit_time: at,
+          },
+        ],
+        total: 1,
+      });
+    if (path === "/api/log/")
+      return response({
+        items: [
+          {
+            id: 1,
+            channel: 22,
+            type: 2,
+            model_name: "image",
+            created_at: at,
+            other: JSON.stringify({ request_path: "/v1/images/generations" }),
+          },
+          {
+            id: 2,
+            channel: 22,
+            type: 5,
+            model_name: "image",
+            created_at: at,
+            content: "upstream failed",
+            other: JSON.stringify({
+              status_code: 502,
+              request_path: "/v1/images/generations",
+            }),
+          },
+          {
+            id: 3,
+            channel: 22,
+            type: 2,
+            model_name: "image",
+            created_at: at,
+            other: JSON.stringify({ request_path: "/v1/videos" }),
+          },
+        ],
+        total: 3,
+      });
+    throw new Error("Unexpected " + path);
+  });
+  const c = rt.center.createChannel({
+    site: { name: "media", url: "https://media.invalid" },
+    name: "media",
+    category: "media",
+    models: ["image"],
+    key: "private",
+  });
+  rt.store.put("channel", {
+    ...rt.store.get("channel", c.id),
+    gateway: { sourceId: "n", channelId: 22 },
+  });
+  assert.equal((await rt.gateways.sync("n")).records, 2);
+  const rows = rt.store.db
+    .prepare("SELECT source_id,result FROM calls ORDER BY source_id")
+    .all();
+  assert.deepEqual(
+    rows.map((r) => ({ ...r })),
+    [
+      { source_id: "1", result: "success" },
+      { source_id: "2", result: "failure" },
+      { source_id: "task:job", result: "success" },
+    ],
+  );
+});

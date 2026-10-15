@@ -717,8 +717,19 @@ export class Gateways {
             typeof x.other === "string"
               ? JSON.parse(x.other || "{}")
               : x.other || {};
-          // Text log records are attempts; media completion is ingested from task state below.
-          if (c?.category === "media") continue;
+          // Standard synchronous image/chat responses finish before a consumption log is written.
+          // Asynchronous submissions are counted from task state, never as completed generations.
+          if (
+            c?.category === "media" &&
+            x.type === 2 &&
+            ![
+              "/v1/images/generations",
+              "/v1/images/edits",
+              "/v1/chat/completions",
+              "/v1/responses",
+            ].includes(other.request_path)
+          )
+            continue;
           if (!c) unmatched++;
           records++;
           const stream = streamOutcome(other.stream_status);
