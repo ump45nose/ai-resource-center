@@ -9,7 +9,7 @@ export type CheckinStatus =
   | "未执行"
   | "无法签到";
 export type ApplyState =
-  "synced" | "pending" | "saving" | "failed" | "diff" | "conflict";
+  "saved" | "synced" | "pending" | "saving" | "failed" | "diff" | "conflict";
 export type ClientState = "draft" | "awaiting" | "verified";
 
 export interface Header {
@@ -18,6 +18,7 @@ export interface Header {
 }
 export interface Channel {
   id: string;
+  authType?: "bearer" | "api_key";
   category: Category;
   gateway?: { sourceId: string; channelId?: number };
   availability?: string;
@@ -65,6 +66,9 @@ export interface Benefit {
   threshold: string;
   drops: string;
   window: string;
+  resetAt?: string;
+  checkinSupported?: boolean | null;
+  ruleText?: string;
   windows?: { start: string; end: string }[];
 }
 export interface Account {
@@ -86,6 +90,7 @@ export interface Account {
   benefit: Benefit;
 }
 export interface Site {
+  aliases?: string[];
   id: string;
   name: string;
   url: string;
@@ -124,12 +129,20 @@ export interface Rules {
   warn: number;
 }
 export interface AppState {
+  pendingImports?: { id: string; source: string; count: number }[];
   sites: Site[];
   accounts: Account[];
   channels: Channel[];
   evals: Evaluation[];
   integrations: Integration[];
   rules: Rules;
+  identities?: {
+    id: string;
+    channelId: string;
+    application: string;
+    state?: string;
+    verifiedAt?: string;
+  }[];
   tmUrl: string;
   today: string;
   demo: boolean;

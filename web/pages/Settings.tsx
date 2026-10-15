@@ -23,7 +23,11 @@ export default function Settings() {
       url: "",
       userId: "",
       key: "",
+      inferenceUrl: "",
     });
+  const [accountTargets, setAccountTargets] = useState<Record<string, string>>(
+    {},
+  );
   const [file, setFile] = useState<File | null>(null),
     [from, setFrom] = useState("file"),
     [preview, setPreview] = useState<{
@@ -103,7 +107,7 @@ export default function Settings() {
                   </Badge>
                   {i.error && <p className="mt-1 text-red-700">{i.error}</p>}
                 </div>
-                {i.kind === "newapi" && (
+                {["newapi", "cpa"].includes(i.kind) && (
                   <Btn onClick={() => act(`/sources/${i.id}/sync`, {})}>
                     读取调用记录
                   </Btn>
@@ -149,6 +153,18 @@ export default function Settings() {
                 onChange={(e) => setSource({ ...source, url: e.target.value })}
               />
             </Field>
+            {source.kind === "cpa" && (
+              <Field label="推理地址">
+                <input
+                  className={inputCls}
+                  value={source.inferenceUrl}
+                  placeholder="http://192.168.31.201:8317/v1"
+                  onChange={(e) =>
+                    setSource({ ...source, inferenceUrl: e.target.value })
+                  }
+                />
+              </Field>
+            )}
             {source.kind === "newapi" && (
               <Field label="管理员用户 ID">
                 <input
@@ -179,6 +195,7 @@ export default function Settings() {
                   const r = await act("/sources", {
                     ...source,
                     userId: source.userId ? Number(source.userId) : undefined,
+                    inferenceUrl: source.inferenceUrl || undefined,
                     key: source.key || undefined,
                   });
                   if (r) setSource({ ...source, key: "" });
@@ -265,6 +282,87 @@ export default function Settings() {
             )}
           </div>
         </Section>
+        <Section
+          title="账号关联"
+          desc="同站点的来源账号与网关占位账号关联后，共享余额只显示一次"
+        >
+          <ul className="divide-y">
+            {s.accounts
+              .filter(
+                (a) =>
+                  s.accounts.filter((x) => x.siteId === a.siteId).length > 1,
+              )
+              .map((a) => (
+                <li
+                  key={a.id}
+                  className="grid gap-2 p-3 sm:grid-cols-[1fr_1fr_auto]"
+                >
+                  <span className="text-sm">
+                    {s.sites.find((x) => x.id === a.siteId)?.name} · {a.name}
+                  </span>
+                  <select
+                    className={inputCls}
+                    value={accountTargets[a.id] || ""}
+                    onChange={(e) =>
+                      setAccountTargets({
+                        ...accountTargets,
+                        [a.id]: e.target.value,
+                      })
+                    }
+                  >
+                    <option value="">选择同一账号的来源记录</option>
+                    {s.accounts
+                      .filter((x) => x.siteId === a.siteId && x.id !== a.id)
+                      .map((x) => (
+                        <option key={x.id} value={x.id}>
+                          {x.name} · {x.unit}
+                        </option>
+                      ))}
+                  </select>
+                  <Btn
+                    disabled={!accountTargets[a.id]}
+                    onClick={() =>
+                      act(`/accounts/${a.id}/merge`, {
+                        targetId: accountTargets[a.id],
+                      })
+                    }
+                  >
+                    关联并合并
+                  </Btn>
+                </li>
+              ))}
+          </ul>
+        </Section>
+        {!!s.pendingImports?.length && (
+          <Section title="待关联导入">
+            <div className="grid gap-2 p-4">
+              {s.pendingImports.map((p) => (
+                <div
+                  key={p.id}
+                  className="flex items-center justify-between gap-3"
+                >
+                  <span>
+                    {p.source} · {p.count} 项需要选择关联目标
+                  </span>
+                  <Btn
+                    onClick={() => {
+                      void act(`/imports/${p.id}`, undefined, "GET").then(
+                        (r) => {
+                          if (r) {
+                            setPreview(r);
+                            setSelected([]);
+                          }
+                        },
+                      );
+                    }}
+                  >
+                    继续关联
+                  </Btn>
+                </div>
+              ))}
+            </div>
+          </Section>
+        )}
         <Section
           title="导入与关联"
           desc="历史可用性保留来源和日期，不计入自动评价；导入不测试 RP"

@@ -8,7 +8,7 @@ import { z } from "zod";
 import { Store, hash } from "./store.mjs";
 import { Center, Problem } from "./center.mjs";
 import { Gateways } from "./gateways.mjs";
-import { rulesSchema, dayKey } from "./domain.mjs";
+import { rulesSchema, dayKey, nextReset } from "./domain.mjs";
 import { parseFile, rowSchema } from "./imports.mjs";
 import { clientConfig } from "./exports.mjs";
 
@@ -160,6 +160,10 @@ export async function createApp({
     return store.put("site", { ...s, ...p, version: s.version + 1 });
   });
   app.post("/api/v1/channels", async (req) => center.createChannel(req.body));
+  app.post("/api/v1/channels/:id/connect-gateway", async (req) => {
+    const { sourceId } = z.object({ sourceId: z.string() }).parse(req.body);
+    return gateways.connect(req.params.id, sourceId);
+  });
   app.patch("/api/v1/channels/:id", async (req) => {
     const { expectedVersion, patch } = z
       .object({
@@ -226,7 +230,52 @@ export async function createApp({
     return store.put("channel", {
       ...c,
       availability: undefined,
+      callIssue: undefined,
       version: c.version + 1,
+    });
+  });
+  app.post("/api/v1/accounts/:id/merge", async (req) => {
+    const { targetId } = z.object({ targetId: z.string() }).parse(req.body);
+    return store.transaction(() => {
+      const a = store.get("account", req.params.id),
+        target = store.get("account", targetId);
+      if (!a || !target || a.id === target.id || a.siteId !== target.siteId)
+        throw new Problem(400, "只能关联同一站点的两个不同账号");
+      const latest =
+        a.confirmedAt > target.confirmedAt && a.balance !== null ? a : target;
+      const rules =
+        a.ruleConfirmedAt &&
+        (!target.ruleConfirmedAt || a.ruleConfirmedAt > target.ruleConfirmedAt)
+          ? a
+          : target;
+      store.put("account", {
+        ...target,
+        balance: latest.balance,
+        unit: latest.unit,
+        confirmedAt: latest.confirmedAt,
+        status: latest.status,
+        benefit: rules.benefit,
+        quota: rules.quota,
+        validUntil: rules.validUntil,
+        version: target.version + 1,
+      });
+      for (const c of store.list("channel").filter((c) => c.accountId === a.id))
+        store.put("channel", {
+          ...c,
+          accountId: target.id,
+          version: c.version + 1,
+        });
+      store.db
+        .prepare("UPDATE refs SET id=? WHERE kind=? AND id=?")
+        .run(target.id, "account", a.id);
+      store.db
+        .prepare("UPDATE events SET account_id=? WHERE account_id=?")
+        .run(target.id, a.id);
+      store.db
+        .prepare("DELETE FROM entities WHERE kind=? AND id=?")
+        .run("account", a.id);
+      store.action(target.id, { result: "account_associated", before: a });
+      return { accountId: target.id };
     });
   });
   app.patch("/api/v1/accounts/:id", async (req) => {
@@ -241,11 +290,17 @@ export async function createApp({
             threshold: z.string(),
             drops: z.string(),
             window: z.string(),
+            resetAt: z
+              .string()
+              .regex(/^([01]\d|2[0-3]):[0-5]\d$/)
+              .optional(),
+            checkinSupported: z.boolean().nullable().optional(),
+            ruleText: z.string().optional(),
             windows: z
               .array(
                 z.object({
-                  start: z.string().regex(/^\d\d:\d\d$/),
-                  end: z.string().regex(/^\d\d:\d\d$/),
+                  start: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+                  end: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
                 }),
               )
               .optional(),
@@ -257,8 +312,21 @@ export async function createApp({
     const a = store.get("account", req.params.id);
     if (a.version !== expectedVersion)
       throw new Problem(409, "权益已被修改，请重新加载");
+    if (patch.benefit.windows?.length && !patch.benefit.tz)
+      throw new Problem(400, "可用窗口必须填写已确认的时区");
     if (patch.benefit.tz)
       new Intl.DateTimeFormat("en-CA", { timeZone: patch.benefit.tz });
+    if (
+      patch.benefit.pool === "daily" &&
+      patch.benefit.tz &&
+      patch.benefit.resetAt &&
+      a.balance !== null
+    )
+      patch.validUntil = nextReset(
+        a.confirmedAt === "—" ? new Date() : a.confirmedAt,
+        patch.benefit.tz,
+        patch.benefit.resetAt,
+      );
     const result = store.put("account", {
       ...a,
       ...patch,
@@ -360,6 +428,7 @@ export async function createApp({
           id: z.string().min(1),
           name: z.string().min(1),
           kind: z.enum(["newapi", "cpa", "sillytavern"]),
+          inferenceUrl: z.url().optional(),
           url: z.url(),
           userId: z.number().int().optional(),
           key: z.string().optional(),
@@ -407,6 +476,20 @@ export async function createApp({
     });
     return { importId, rows: center.importPreview(rows, p.source) };
   });
+  app.get("/api/v1/imports/:id", async (req) => {
+    const p = store.setting(`import:${req.params.id}`);
+    if (!p) throw new Problem(404, "导入记录不存在");
+    const rows = p.rows.map(({ importCredential, ...r }) => ({
+      ...r,
+      ...(importCredential ? { key: store.reveal(importCredential) } : {}),
+    }));
+    return {
+      importId: req.params.id,
+      rows: center
+        .importPreview(rows, p.source)
+        .filter((r) => !(p.committed || []).includes(r.index)),
+    };
+  });
   app.post("/api/v1/imports/:id/commit", async (req) => {
     const p = z
         .object({
@@ -420,15 +503,26 @@ export async function createApp({
         })
         .parse(req.body),
       preview = store.setting(`import:${req.params.id}`);
-    if (!preview || Date.now() - preview.createdAt > 86400000)
-      throw new Problem(410, "导入预览已过期，请重新读取");
+    if (!preview) throw new Problem(410, "导入预览已过期，请重新读取");
     const rows = preview.rows.map(({ importCredential, ...r }) => ({
       ...r,
       ...(importCredential ? { key: store.reveal(importCredential) } : {}),
     }));
-    return { ids: center.importRows(rows, preview.source, p.selections) };
+    const ids = center.importRows(rows, preview.source, p.selections);
+    store.setting(`import:${req.params.id}`, {
+      ...preview,
+      committed: [
+        ...new Set([
+          ...(preview.committed || []),
+          ...p.selections.map((x) => x.index),
+        ]),
+      ],
+    });
+    return { ids };
   });
   async function exported(c, client, model, identity, prepared) {
+    if (["general", "media"].includes(c.category) && !c.gateway)
+      throw new Problem(400, "请先接入 fn 网关，再生成应用配置");
     if (c.category === "rp" && client !== "SillyTavern")
       throw new Problem(400, "RP 连接由酒馆独占");
     if (c.category === "client" && client !== c.client && client !== "Magpie")
@@ -439,7 +533,22 @@ export async function createApp({
       const token =
         prepared || (await gateways.inferenceToken(c, identity || client));
       key = token.key;
-      connection = { ...c, baseUrl: token.baseUrl };
+      const source = gateways.source(c.gateway.sourceId);
+      connection = {
+        ...c,
+        protocol:
+          client === "Claude Code"
+            ? "Anthropic"
+            : client === "Codex"
+              ? "OpenAI Responses"
+              : c.protocol === "Anthropic"
+                ? "Anthropic"
+                : "OpenAI",
+        baseUrl:
+          client === "Claude Code" || c.protocol === "Anthropic"
+            ? token.baseUrl.replace(/\/v1\/?$/, "")
+            : token.baseUrl,
+      };
     }
     if (!key) throw new Problem(400, "缺少推理 key，请补充凭据");
     return clientConfig(connection, client, key, model);
@@ -480,6 +589,24 @@ export async function createApp({
       applyMsg: "人工确认真实任务成功",
     });
   });
+  app.post("/api/v1/identities/:id/verify", async (req) => {
+    const { summary } = z
+        .object({ summary: z.string().min(1) })
+        .parse(req.body),
+      identity = store.get("identity", req.params.id);
+    if (!identity) throw new Problem(404, "配置身份不存在");
+    store.action(identity.channelId, {
+      result: "client_verified",
+      application: identity.application,
+      summary,
+      source: "人工确认",
+    });
+    return store.put("identity", {
+      ...identity,
+      state: "verified",
+      verifiedAt: new Date().toISOString(),
+    });
+  });
   app.post("/api/v1/evaluations", async (req) => {
     const p = z
         .object({
@@ -493,6 +620,8 @@ export async function createApp({
     if (!c || !c.models.includes(p.model))
       throw new Problem(400, "请选择渠道的已保存模型");
     if (c.category === "rp") throw new Problem(400, "RP 禁止任务测活");
+    if (["general", "media"].includes(c.category) && !c.gateway)
+      throw new Problem(400, "请先接入 fn 网关，再准备评估配置");
     let token;
     if (c.gateway && c.category !== "client") {
       const source = gateways.source(c.gateway.sourceId);

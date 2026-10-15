@@ -140,6 +140,7 @@ export function ChannelDrawer({
       "headers",
       "category",
       "client",
+      "authType",
     ] as const;
     const patch = Object.fromEntries(
       fields
@@ -185,6 +186,28 @@ export function ChannelDrawer({
           className={`mb-4 rounded-md px-3 py-2 text-sm ${c.apply === "failed" ? "bg-red-50 text-red-800" : c.apply === "synced" ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-800"}`}
         >
           {c.applyMsg}
+        </div>
+      )}
+      {!c.gateway && ["general", "media"].includes(c.category) && (
+        <div className="mb-4 rounded border border-blue-200 bg-blue-50 p-3 text-sm">
+          接入 fn 网关后，再为各应用生成独立调用身份。
+          {s.integrations
+            .filter((i) => i.kind === "newapi")
+            .map((i) => (
+              <Btn
+                key={i.id}
+                disabled={!c.hasKey || !c.models.length}
+                onClick={() => {
+                  void act(`/channels/${c.id}/connect-gateway`, {
+                    sourceId: i.id,
+                  }).then((r) => {
+                    if (r) setF(r);
+                  });
+                }}
+              >
+                接入 {i.name}
+              </Btn>
+            ))}
         </div>
       )}
       <div className="grid gap-4">
@@ -262,6 +285,20 @@ export function ChannelDrawer({
             </select>
           </Field>
         </div>
+        {f.protocol === "Anthropic" && (
+          <Field label="认证方式">
+            <select
+              className={inputCls}
+              value={f.authType || "bearer"}
+              onChange={(e) =>
+                up({ authType: e.target.value as Channel["authType"] })
+              }
+            >
+              <option value="bearer">Bearer Token</option>
+              <option value="api_key">x-api-key</option>
+            </select>
+          </Field>
+        )}
         <Field label="挑选的模型" hint="逗号分隔；只放实际要用的几个">
           <input
             className={inputCls + " font-mono text-xs"}

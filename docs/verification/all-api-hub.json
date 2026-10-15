@@ -1,0 +1,11 @@
+{
+  "passed": true,
+  "checks": [
+    "compiled MV3 extension settings work",
+    "account observation persists in the real Chrome outbox",
+    "offline error keeps the event",
+    "retry receives fn acknowledgement and removes only that event",
+    "no login token appears in the event"
+  ],
+  "accounts": 1
+}

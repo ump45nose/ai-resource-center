@@ -68,7 +68,7 @@ export function Drawer({ open, onClose, title, sub, children, footer, wide }: { 
             <X size={18} strokeWidth={1.75} />
           </button>
         </header>
-        <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
+        <div className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-5 py-4">{children}</div>
         {footer && <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-zinc-200 px-5 py-3">{footer}</footer>}
       </aside>
     </div>
@@ -115,8 +115,8 @@ export function chanStatus(c: Channel, site: Site, acct: Account | undefined, ru
   if (site.issue === '限流') return { label: '限流', tone: 'warn' }
   if (site.issue) return { label: site.issue, tone: 'err' }
   if (acct && acct.balance === 0) return { label: '余额耗尽', tone: 'err' }
-  if (site.category === 'rp') return { label: '人工固定', tone: 'info', icon: CheckCircle2 }
-  if (site.category === 'client') return c.clientState === 'verified' ? { label: '已验证', tone: 'ok' } : { label: '待客户端确认', tone: 'warn', icon: Clock }
+  if (c.category === 'rp') return { label: '人工固定', tone: 'info', icon: CheckCircle2 }
+  if (c.category === 'client') return c.clientState === 'verified' ? { label: '已验证', tone: 'ok' } : { label: '待客户端确认', tone: 'warn', icon: Clock }
   if (c.samples < rules.samples) return { label: '待评价', tone: 'info', icon: CircleHelp }
   if ((c.success ?? 0) < rules.warn) return { label: '降级', tone: 'err' }
   if ((c.success ?? 0) < rules.good) return { label: '观察', tone: 'warn' }
@@ -141,7 +141,11 @@ export function ApplyBadge({ a, cat }: { a: ApplyState; cat?: string }) {
   }
 }
 
+export function Amount({ a }: { a?: { balance: number | null; unit: string } }) {
+  if (!a || a.balance == null) return <span className="text-amber-700">待确认</span>
+  return <span className="tabular-nums">{a.balance.toLocaleString('en-US', { maximumFractionDigits: 2 })} <span className="text-xs font-normal text-zinc-500">{a.unit}</span></span>
+}
+
 export function Empty({ children }: { children: ReactNode }) {
   return <div className="px-4 py-10 text-center text-sm text-zinc-500">{children}</div>
 }
-

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { ChevronRight, Search, Pencil, GitCompare, Power } from 'lucide-react'
 import { useStore } from '../store'
-import { Badge, Btn, Section, Url, chanStatus, PageHead, ApplyBadge, inputCls, Empty } from '../ui'
+import { Amount, Badge, Btn, Section, Url, chanStatus, PageHead, ApplyBadge, inputCls, Empty } from '../ui'
 import { ChannelDrawer, ConflictDrawer } from '../shared'
 import { catLabel, type Site, type Channel } from '../data'
 import RpView from './Rp'
@@ -24,9 +24,11 @@ export default function Resources() {
   const [conf, setConf] = useState<string | null>(null)
   const q = query.trim().toLowerCase()
   const chansOf = (id: string) => s.channels.filter((c) => c.siteId === id)
+  // 按连接用途筛选：同一站点可同时有通用、RP、客户端绑定等连接
+  const vis = (c: Channel) => sub === 'all' || sub === 'issue' || c.category === sub
   const sites = s.sites.filter((x) => {
-    const cs = chansOf(x.id)
-    if (sub === 'issue' ? !isIssue(x, cs) : sub !== 'all' && x.category !== sub) return false
+    const cs = chansOf(x.id).filter(vis)
+    if (sub === 'issue' ? !isIssue(x, cs) : !cs.length) return false
     if (proto && !cs.some((c) => c.protocol === proto)) return false
     if (prob === 'yes' && !isIssue(x, cs)) return false
     if (prob === 'no' && isIssue(x, cs)) return false
@@ -40,7 +42,7 @@ export default function Resources() {
       <div className="mb-4 -mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
         <div className="flex w-max gap-1 border-b border-zinc-200">
           {tabs.map(([k, l]) => {
-            const n = k === 'all' ? s.sites.length : k === 'issue' ? s.sites.filter((x) => isIssue(x, chansOf(x.id))).length : s.sites.filter((x) => x.category === k).length
+            const n = k === 'all' ? s.sites.length : k === 'issue' ? s.sites.filter((x) => isIssue(x, chansOf(x.id))).length : s.sites.filter((x) => chansOf(x.id).some((c) => c.category === k)).length
             return (
               <button key={k} onClick={() => go('resources', k)} className={`-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-sm ${sub === k ? 'border-blue-600 font-medium text-zinc-900' : 'border-transparent text-zinc-500 hover:text-zinc-800'}`}>
                 {l} <span className="tabular-nums text-zinc-400">{n}</span>
@@ -62,8 +64,8 @@ export default function Resources() {
             </div>
             {sites.length === 0 && <Empty>没有匹配的站点，调整搜索或筛选</Empty>}
             {sites.map((x) => {
-              const cs = chansOf(x.id)
-              const accts = s.accounts.filter((a) => a.siteId === x.id)
+              const cs = chansOf(x.id).filter(vis)
+              const accts = s.accounts.filter((a) => a.siteId === x.id && cs.some((c) => c.accountId === a.id))
               const isOpen = open[x.id]
               return (
                 <div key={x.id} className="border-b border-zinc-100 last:border-0">
@@ -71,11 +73,11 @@ export default function Resources() {
                     <ChevronRight size={16} className={`mt-0.5 text-zinc-400 transition lg:mt-0 ${isOpen ? 'rotate-90' : ''}`} />
                     <div className="min-w-0"><div className="font-medium text-zinc-900">{x.name}</div><div className="text-xs"><Url href={x.url} /></div></div>
                     <div className="col-start-2 text-xs lg:col-start-auto">{x.checkinUrl ? <span><span className="text-zinc-500 lg:hidden">签到：</span><Url href={x.checkinUrl} /></span> : <span className="text-zinc-500">同网站</span>}</div>
-                    <div className="col-start-2 text-xs text-zinc-600 lg:col-start-auto">{catLabel[x.category]}</div>
-                    <div className="col-start-2 text-xs lg:col-start-auto">{accts.map((a) => <div key={a.id} className="tabular-nums">{a.balance == null ? <span className="text-amber-700">待确认</span> : `$${a.balance.toFixed(2)}`} <span className="text-zinc-500">{a.quota === 'daily' ? '当日' : '长期'} · {a.confirmedAt}</span></div>)}</div>
+                    <div className="col-start-2 text-xs text-zinc-600 lg:col-start-auto">{[...new Set(chansOf(x.id).map((c) => catLabel[c.category]))].join('、')}</div>
+                    <div className="col-start-2 text-xs lg:col-start-auto">{accts.map((a) => <div key={a.id} className="tabular-nums"><Amount a={a} /> <span className="text-zinc-500">{a.quota === 'daily' ? '当日' : '长期'} · {a.confirmedAt}</span></div>)}</div>
                     <div className="col-start-2 flex flex-wrap gap-1 lg:col-start-auto">
                       {x.issue ? <Badge tone={x.issue === '限流' ? 'warn' : 'err'}>{x.issue}</Badge> : <Badge tone="ok">正常</Badge>}
-                      {cs.filter((c) => c.apply !== 'synced').map((c) => <ApplyBadge key={c.id} a={c.apply} cat={x.category} />)}
+                      {cs.filter((c) => c.apply !== 'synced').map((c) => <ApplyBadge key={c.id} a={c.apply} cat={c.category} />)}
                     </div>
                   </div>
                   {isOpen && (
@@ -84,7 +86,7 @@ export default function Resources() {
                         <div key={a.id} className="mt-2 rounded-md border border-zinc-200 bg-white">
                           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-zinc-100 px-3 py-2 text-xs">
                             <span className="font-medium text-zinc-900">账号 {a.name}</span>
-                            <span>余额 <b className="tabular-nums">{a.balance == null ? '待确认' : `$${a.balance.toFixed(2)}`}</b>（{a.quota === 'daily' ? '当日额度' : '长期额度'}）</span>
+                            <span>余额 <b className="tabular-nums"><Amount a={a} /></b>（{a.quota === 'daily' ? '当日额度' : '长期额度'}）</span>
                             <span className="text-zinc-500">确认于 {a.confirmedAt}</span>
                             {a.expires && <span className="text-amber-700">到期 {a.expires}</span>}
                           </div>
@@ -120,17 +122,16 @@ function ChannelRow({ c, site, onEdit, onConflict }: { c: Channel; site: Site; o
       </div>
       <div className="text-zinc-600">
         <div>{c.mode === 'auto' ? '自动管理' : '人工管理'} · 评价 {c.rating || '未评'} · v{c.version}</div>
-        <div className="mt-1 flex flex-wrap gap-1"><ApplyBadge a={c.apply} cat={site.category} /></div>
+        <div className="mt-1 flex flex-wrap gap-1"><ApplyBadge a={c.apply} cat={c.category} /></div>
         {c.applyMsg && c.apply !== 'synced' && <div className={`mt-1 ${c.apply === 'failed' ? 'text-red-700' : 'text-amber-700'}`}>{c.applyMsg}</div>}
       </div>
       <div className="flex flex-wrap gap-1 md:justify-end">
         {c.apply === 'conflict' && <Btn size="sm" kind="danger" onClick={onConflict}><GitCompare size={13} />处理冲突</Btn>}
-        {c.apply === 'diff' && <Btn size="sm" onClick={() => { updChannel(c.id, { apply: 'synced', applyMsg: '已用中心配置覆盖外部' }); toast('已以中心配置为准同步') }}>以中心为准</Btn>}
-        {c.apply === 'failed' && <Btn size="sm" onClick={() => { updChannel(c.id, { apply: 'synced', applyMsg: '重试成功，已生效' }); toast('重试成功，New API 已生效') }}>重试生效</Btn>}
+        {c.apply === 'diff' && <Btn size="sm" onClick={() => { updChannel(c.id, { apply: 'pending', applyMsg: '已选择以中心配置为准，待同步到 New API' }); toast('已选择中心配置，待同步', 'info') }}>以中心为准</Btn>}
+        {c.apply === 'failed' && <Btn size="sm" onClick={() => { updChannel(c.id, { apply: 'pending', applyMsg: '已加入重试队列；演示环境未发送请求，生效结果待同步' }); toast('已加入重试队列，待同步', 'info') }}>加入重试</Btn>}
         <Btn size="sm" onClick={() => { if (!c.enabled && c.keyMask === '未填写') return toast('缺 key，请先在编辑中填写凭据', 'err'); updChannel(c.id, { enabled: !c.enabled }); toast(c.enabled ? `${c.name} 已暂停` : `${c.name} 已启用`) }}><Power size={13} />{c.enabled ? '暂停' : '启用'}</Btn>
         <Btn size="sm" onClick={onEdit}><Pencil size={13} />编辑</Btn>
       </div>
     </div>
   )
 }
-

@@ -1,11 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import { hash } from "./store.mjs";
 import {
   channelPatch,
   headers,
   normalizeUrl,
+  canonicalApi,
   dayKey,
   evaluate,
+  nextReset,
+  availability,
 } from "./domain.mjs";
 
 export class Problem extends Error {
@@ -16,6 +20,7 @@ export class Problem extends Error {
   }
 }
 const defaults = {
+  authType: "bearer",
   category: "general",
   protocol: "OpenAI",
   models: [],
@@ -49,7 +54,7 @@ export const eventSchema = z
       checkinUrl: z.url().optional(),
     }),
     name: z.string(),
-    balance: z.number().nonnegative().nullable().optional(),
+    balance: z.number().nullable().optional(),
     unit: z.string().optional(),
     status: z.string().optional(),
     businessDate: z
@@ -109,20 +114,33 @@ export class Center {
     const site = this.site(input.site, source),
       id = this.store.ref(source, "account", input.accountId);
     const old = id ? this.store.get("account", id) : null;
+    const observedAt = Date.parse(input.occurredAt),
+      balanceFresh =
+        input.balance !== undefined &&
+        (!Number.isFinite(Date.parse(old?.confirmedAt)) ||
+          observedAt >= Date.parse(old.confirmedAt)),
+      statusFresh =
+        !Number.isFinite(Date.parse(old?.observedAt || old?.confirmedAt)) ||
+        observedAt >= Date.parse(old.observedAt || old.confirmedAt);
     // Login/observed balance are source facts. Purpose and entitlement rules stay local.
     const account = this.store.put(
       "account",
       old
         ? {
             ...old,
-            ...(input.balance !== undefined
+            ...(balanceFresh
               ? {
                   balance: input.balance,
                   unit: input.unit || old.unit,
                   confirmedAt: input.occurredAt,
                 }
               : {}),
-            status: input.status || old.status,
+            ...(statusFresh
+              ? {
+                  status: input.status || old.status,
+                  observedAt: input.occurredAt,
+                }
+              : {}),
           }
         : {
             id: randomUUID(),
@@ -132,6 +150,7 @@ export class Center {
             balance: input.balance ?? null,
             unit: input.unit || "待确认",
             confirmedAt: input.balance === undefined ? "—" : input.occurredAt,
+            observedAt: input.occurredAt,
             quota: "long",
             benefit: {
               pool: "long",
@@ -145,6 +164,19 @@ export class Center {
             sourceId: input.accountId,
           },
     );
+    if (
+      balanceFresh &&
+      account.quota === "daily" &&
+      account.benefit.tz &&
+      account.benefit.resetAt
+    ) {
+      account.validUntil = nextReset(
+        input.occurredAt,
+        account.benefit.tz,
+        account.benefit.resetAt,
+      );
+      this.store.put("account", account);
+    }
     this.store.ref(source, "account", input.accountId, account.id);
     return account;
   }
@@ -177,7 +209,8 @@ export class Center {
           );
         ack.push(e.eventId);
       }
-      this.store.setting(`received:${source}`, new Date().toISOString());
+      if (events.some((e) => e.method !== "备份导入"))
+        this.store.setting(`received:${source}`, new Date().toISOString());
       return { acknowledgedIds: ack };
     });
   }
@@ -185,6 +218,11 @@ export class Center {
     const { credentialId, applied, ...out } = c;
     return {
       ...out,
+      availability:
+        availability(
+          { ...c, enabled: true },
+          this.store.get("account", c.accountId),
+        ) || undefined,
       keyMask: credentialId
         ? "••••" + this.store.reveal(credentialId).slice(-4)
         : c.nativeCredentialRef
@@ -230,6 +268,9 @@ export class Center {
       accounts,
       channels,
       evals: this.store.list("evaluation"),
+      identities: this.store
+        .list("identity")
+        .map(({ credentialId, pendingCredentialId, name, ...i }) => i),
       rules: this.store.setting("rules") || {
         days: 7,
         samples: 30,
@@ -247,6 +288,21 @@ export class Center {
         sillyTavern: this.store.setting("received:sillytavern"),
       },
       today: dayKey(new Date()),
+      pendingImports: this.store.db
+        .prepare(
+          "SELECT key,data FROM settings WHERE key LIKE 'import:%' ORDER BY rowid DESC LIMIT 20",
+        )
+        .all()
+        .flatMap((x) => {
+          const p = JSON.parse(x.data);
+          const rows = this.importPreview(p.rows, p.source).filter(
+            (r) =>
+              r.kind === "待关联" && !(p.committed || []).includes(r.index),
+          );
+          return rows.length
+            ? [{ id: x.key.slice(7), source: p.source, count: rows.length }]
+            : [];
+        }),
       demo: false,
     };
   }
@@ -277,8 +333,19 @@ export class Center {
       c.accessMode = "client_bound";
       c.clientState = "draft";
     } else c.accessMode = "gateway";
+    if (
+      c.mode === "auto" &&
+      (old.mode !== "auto" ||
+        (p.priority !== undefined && p.priority !== old.priority) ||
+        (p.weight !== undefined && p.weight !== old.weight))
+    )
+      c.baseRouting = { priority: c.priority, weight: c.weight };
+    if (c.mode === "manual") delete c.baseRouting;
     c.headers = headers(c.headers);
-    if (key) c.credentialId = this.store.secret(key, old.credentialId);
+    if (key) {
+      c.credentialId = this.store.secret(key);
+      if (c.gateway) c.credentialPending = true;
+    }
     if (
       !this.store.get("account", c.accountId) ||
       !this.store.get("site", c.siteId)
@@ -292,6 +359,7 @@ export class Center {
           .filter((k) => k !== "key")
           .map((k) => [k, old[k]]),
       ),
+      ...(key ? { previousCredentialId: old.credentialId } : {}),
       result: "saved",
     });
     return this.publicChannel(c);
@@ -347,14 +415,43 @@ export class Center {
       let channel = r.sourceId && this.store.ref(source, "channel", r.sourceId);
       channel = channel ? this.store.get("channel", channel) : null;
       if (!channel && site) {
-        const matches = this.store
+        let matches = this.store
           .list("channel")
           .filter(
             (c) =>
               c.siteId === site.id &&
-              c.baseUrl === r.baseUrl &&
+              canonicalApi(c.baseUrl, c.protocol) ===
+                canonicalApi(r.baseUrl, r.protocol) &&
               c.protocol === (r.protocol || "OpenAI"),
           );
+        if (r.gateway)
+          matches = matches.filter(
+            (c) =>
+              !c.gateway ||
+              (c.gateway.sourceId === r.gateway.sourceId &&
+                c.gateway.channelId === r.gateway.channelId &&
+                c.gateway.provider === r.gateway.provider),
+          );
+        if (r.nativeCredentialRef)
+          matches = matches.filter(
+            (c) =>
+              !c.nativeCredentialRef ||
+              (c.nativeCredentialRef.profileId ===
+                r.nativeCredentialRef.profileId &&
+                c.nativeCredentialRef.device === r.nativeCredentialRef.device),
+          );
+        if (r.key || r.credentialFingerprint) {
+          const exact = matches.filter(
+            (c) =>
+              c.credentialId &&
+              this.store.db
+                .prepare("SELECT fingerprint FROM credentials WHERE id=?")
+                .get(c.credentialId)?.fingerprint ===
+                (r.credentialFingerprint || hash(r.key)),
+          );
+          if (exact.length) matches = exact;
+          else matches = matches.filter((c) => !c.credentialId);
+        }
         if (matches.length === 1) channel = matches[0];
         if (matches.length > 1)
           return {
@@ -399,17 +496,30 @@ export class Center {
           if (!c) throw new Problem(404, "关联连接不存在");
           if (row.key && !c.credentialId)
             c.credentialId = this.store.secret(row.key);
+          if (row.nativeCredentialRef && !c.nativeCredentialRef)
+            c.nativeCredentialRef = row.nativeCredentialRef;
           if (category && category !== c.category)
             throw new Problem(
               409,
               "用途迁移请在渠道详情完成，导入不覆盖人工用途",
             );
+          if (row.gateway && !c.gateway) {
+            c.gateway = row.gateway;
+            c.applied = row.applied;
+            c.group = row.group;
+            c.priority = row.priority ?? c.priority;
+            c.weight = row.weight ?? c.weight;
+            c.apply = "saved";
+            c.applyMsg = "已关联网关，人工用途和选定模型保留；未提交配置变更";
+            this.backfill(row.gateway.sourceId);
+          }
           this.store.put("channel", {
             ...c,
             sources: [...new Set([...(c.sources || []), source])],
           });
           if (row.sourceId)
             this.store.ref(source, "channel", row.sourceId, c.id);
+          this.importRules(c.accountId, row, source);
           return c.id;
         }
         const s = this.site(row.site, source);
@@ -438,13 +548,13 @@ export class Center {
           accountId,
           category: row.category || "general",
           baseUrl: row.baseUrl || s.url,
-          enabled:
-            row.enabled !== false &&
-            (!!row.key || !!row.gateway || !!row.nativeCredentialRef),
+          enabled: row.enabled !== false,
           mode: "manual",
           version: 1,
           sources: [source],
           reason: "导入历史，不计入评价样本",
+          apply: "saved",
+          applyMsg: "来源已记录，未提交配置变更",
         };
         delete c.key;
         delete c.site;
@@ -457,9 +567,50 @@ export class Center {
               : "gateway";
         if (c.category === "rp") c.bindings = ["酒馆"];
         this.store.put("channel", c);
+        if (row.gateway) this.backfill(row.gateway.sourceId);
+        this.importRules(accountId, row, source);
         if (row.sourceId) this.store.ref(source, "channel", row.sourceId, c.id);
         return c.id;
       }),
+    );
+  }
+  importRules(accountId, row, source) {
+    const a = this.store.get("account", accountId);
+    if (
+      !a.ruleConfirmedAt &&
+      (row.ruleText || row.checkinSupported !== undefined)
+    ) {
+      this.store.put("account", {
+        ...a,
+        benefit: {
+          ...a.benefit,
+          ...(row.ruleText ? { ruleText: row.ruleText } : {}),
+          ...(row.checkinSupported !== undefined
+            ? { checkinSupported: row.checkinSupported }
+            : {}),
+        },
+        ruleSource: source,
+      });
+    }
+  }
+  backfill(sourceId) {
+    const sources = this.store.setting("sources") || [],
+      start = Date.now() - 7 * 86400000;
+    this.store.setting(
+      "sources",
+      sources.map((s) =>
+        s.id !== sourceId
+          ? s
+          : s.kind === "newapi"
+            ? {
+                ...s,
+                cursor: Math.min(
+                  s.cursor || Infinity,
+                  Math.floor(start / 1000),
+                ),
+              }
+            : { ...s, cursorMs: Math.min(s.cursorMs || Infinity, start) },
+      ),
     );
   }
   recompute(now = new Date()) {

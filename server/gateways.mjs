@@ -1,7 +1,12 @@
 import { isDeepStrictEqual } from "node:util";
-import { randomUUID } from "node:crypto";
+import { randomUUID, randomBytes } from "node:crypto";
 import { Problem } from "./center.mjs";
-import { errorType, normalizeUrl } from "./domain.mjs";
+import {
+  errorType,
+  normalizeUrl,
+  canonicalApi,
+  availability,
+} from "./domain.mjs";
 
 const routing = (c) => ({
   priority: c.priority || 0,
@@ -26,6 +31,8 @@ export class Gateways {
     this.fetch = fetcher;
     this.running = false;
     this.applying = new Set();
+    this.provisioning = new Map();
+    this.lastEligibilityCheck = null;
   }
   source(id) {
     const s = (this.store.setting("sources") || []).find((s) => s.id === id);
@@ -132,7 +139,95 @@ export class Gateways {
       this.applying.delete(id);
     }
   }
-  async applyOnce(id, { force = false } = {}) {
+  async connect(id, sourceId) {
+    if (this.applying.has(id))
+      throw new Problem(409, "该连接正在应用，请稍后回读");
+    this.applying.add(id);
+    try {
+      return await this.connectOnce(id, sourceId);
+    } finally {
+      this.applying.delete(id);
+    }
+  }
+  async connectOnce(id, sourceId) {
+    const c = this.store.get("channel", id),
+      source = this.source(sourceId);
+    if (!c || !["general", "media"].includes(c.category))
+      throw new Problem(400, "只有通用与生图视频连接可以接入公共网关");
+    if (source.kind !== "newapi")
+      throw new Problem(400, "新增渠道仅支持 New API");
+    if (c.gateway) throw new Problem(409, "已经关联网关，请先读取现有配置");
+    const key = this.store.reveal(c.credentialId);
+    if (!key || !c.models.length)
+      throw new Problem(400, "请先补充 key 并选定模型");
+    if (c.gatewayPreparing && c.gatewayPreparing !== sourceId)
+      throw new Problem(409, "有未确认的网关接入，请先核对原网关");
+    const tag = `arc-${c.id}`;
+    let remote = (await this.pages(source, "/api/channel/")).find(
+      (x) => x.tag === tag,
+    );
+    if (!remote) {
+      if (c.gatewayPreparing)
+        throw new Problem(
+          409,
+          "上次创建结果尚未确认，请在 New API 核对后处理；没有重复创建",
+        );
+      this.store.put("channel", { ...c, gatewayPreparing: sourceId });
+      await this.request(source, "/api/channel/", "POST", {
+        mode: "single",
+        channel: {
+          type:
+            c.protocol === "Anthropic" ? 14 : c.protocol === "Gemini" ? 24 : 1,
+          name: c.name,
+          tag,
+          key,
+          base_url: canonicalApi(c.baseUrl, c.protocol),
+          models: c.models.join(","),
+          group: "default",
+          status: c.enabled ? 1 : 2,
+          priority: c.priority,
+          weight: c.weight,
+          auto_ban: 0,
+          header_override: JSON.stringify(
+            Object.fromEntries(c.headers.map((x) => [x.name, x.value])),
+          ),
+        },
+      });
+      remote = (await this.pages(source, "/api/channel/")).find(
+        (x) => x.tag === tag,
+      );
+    }
+    if (!remote)
+      throw new Problem(502, "网关创建结果未确认，请核对该站点的渠道标签");
+    const current = this.store.get("channel", id);
+    const saved = this.store.put("channel", {
+      ...current,
+      gatewayPreparing: undefined,
+      gateway: { sourceId, channelId: remote.id },
+      applied: observed(remote),
+      group: remote.group,
+      version: current.version + 1,
+      apply: current.version === c.version ? "synced" : "pending",
+      applyMsg:
+        current.version === c.version
+          ? "New API 已创建并回读；没有调用上游"
+          : "已关联网关；期间的中心修改仍待应用",
+      mode: current.version === c.version ? "auto" : current.mode,
+      baseRouting: {
+        priority: remote.priority || 0,
+        weight: remote.weight || 100,
+      },
+    });
+    this.store.ref(sourceId, "channel", remote.id, id);
+    this.center.backfill(sourceId);
+    this.store.action(id, {
+      result: "gateway_connected",
+      sourceId,
+      channelId: remote.id,
+    });
+    return this.center.publicChannel(saved);
+  }
+  async applyOnce(id, { force = false, automatic = false } = {}) {
     const c = this.store.get("channel", id);
     if (!c) throw new Problem(404, "渠道不存在");
     if (!c.gateway)
@@ -147,9 +242,11 @@ export class Gateways {
       throw new Problem(400, "CPA 配置保留人工管理，请在 CPA 确认并重新读取");
     let remote;
     try {
-      remote = observed(
-        await this.request(source, `/api/channel/${c.gateway.channelId}`),
+      const fullRemote = await this.request(
+        source,
+        `/api/channel/${c.gateway.channelId}`,
       );
+      remote = observed(fullRemote);
       if (c.applied && !force && !isDeepStrictEqual(remote, c.applied)) {
         this.store.put("channel", {
           ...c,
@@ -159,19 +256,38 @@ export class Gateways {
         });
         throw new Problem(409, "发现外部配置修改", { external: remote });
       }
-      const desired = routing(c);
+      const desired = automatic
+        ? { ...remote, priority: c.priority, weight: c.weight }
+        : routing(c);
       if (c.category === "rp") desired.status = 2;
+      const {
+        key,
+        status,
+        created_time,
+        test_time,
+        response_time,
+        balance,
+        balance_updated_time,
+        used_quota,
+        channel_info,
+        ...nativeConfig
+      } = fullRemote;
       const update = {
+        ...nativeConfig,
         id: c.gateway.channelId,
         name: desired.name,
         models: desired.models.join(","),
         base_url: desired.base_url,
         priority: desired.priority,
         weight: desired.weight,
+        ...(!automatic && c.credentialPending
+          ? { key: this.store.reveal(c.credentialId) }
+          : {}),
       };
       if (
         c.category !== "rp" &&
-        !isDeepStrictEqual({ ...remote, status: desired.status }, desired)
+        ((c.credentialPending && !automatic) ||
+          !isDeepStrictEqual({ ...remote, status: desired.status }, desired))
       )
         await this.request(source, "/api/channel/", "PUT", update);
       if (remote.status !== desired.status)
@@ -191,6 +307,9 @@ export class Gateways {
       this.store.put("channel", {
         ...current,
         applied: after,
+        ...(!automatic && c.credentialPending
+          ? { credentialPending: current.credentialId !== c.credentialId }
+          : {}),
         external: undefined,
         apply:
           current.version !== c.version || c.category === "rp"
@@ -201,7 +320,9 @@ export class Gateways {
             ? "旧版本已回读，新修改待应用"
             : c.category === "rp"
               ? "旧网关入口已停用，等待酒馆应用"
-              : "网关已回读确认",
+              : c.credentialPending && !automatic
+                ? "网关配置已回读；key 已提交，等待真实调用确认"
+                : "网关已回读确认",
       });
       this.store.action(id, { before: remote, after, result: "applied" });
       return this.center.publicChannel(this.store.get("channel", id));
@@ -245,6 +366,9 @@ export class Gateways {
     });
   }
   call(source, id, c, model, time, result, detail = {}) {
+    const previous = this.store.db
+      .prepare("SELECT result FROM calls WHERE source=? AND source_id=?")
+      .get(source, String(id));
     this.store.db
       .prepare(
         "INSERT INTO calls VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(source,source_id) DO UPDATE SET result=excluded.result,error_type=excluded.error_type,summary=excluded.summary",
@@ -258,15 +382,140 @@ export class Gateways {
         result,
         detail.errorType || null,
         detail.latency ?? null,
-        detail.ttft ?? null,
+        Number.isFinite(detail.ttft) && detail.ttft > 0 ? detail.ttft : null,
         detail.requestId || null,
         detail.tokenId ? String(detail.tokenId) : null,
-        detail.streamStatus || null,
+        typeof detail.streamStatus === "string"
+          ? detail.streamStatus
+          : detail.streamStatus
+            ? JSON.stringify(detail.streamStatus)
+            : null,
         detail.summary?.slice(0, 300) || null,
       );
+    const current = this.store.get("channel", c.id);
+    if (
+      (!previous || previous.result !== result) &&
+      current &&
+      c.models.includes(model) &&
+      (!current.callObservedAt || time >= current.callObservedAt)
+    ) {
+      const reasons = {
+        rate: "限流",
+        quota: "余额或额度不足",
+        key: "调用凭据错误",
+        account: "账号需验证",
+      };
+      this.store.put("channel", {
+        ...current,
+        callObservedAt: time,
+        ...(result === "success" ? { availability: undefined } : {}),
+        callIssue:
+          result === "failure" && reasons[detail.errorType]
+            ? { reason: reasons[detail.errorType], model, at: time }
+            : result === "success"
+              ? undefined
+              : current.callIssue,
+      });
+    }
+  }
+  async syncCpa(source) {
+    const end = Date.now(),
+      start = source.cursorMs || end - 7 * 86400000;
+    const channels = this.store
+      .list("channel")
+      .filter((c) => c.gateway?.sourceId === source.id && c.category !== "rp");
+    const providers = [
+      ...new Set(
+        channels.map((c) => "openai-compatible-" + c.gateway.provider),
+      ),
+    ];
+    if (!providers.length) return { records: 0, unmatched: 0 };
+    let before = {},
+      records = 0,
+      unmatched = 0;
+    for (;;) {
+      const data = await this.request(
+        source,
+        "/v0/management/monitoring/analytics",
+        "POST",
+        {
+          from_ms: start,
+          to_ms: end,
+          time_zone: "UTC",
+          filters: { providers, include_failed: true },
+          include: { events_page: { limit: 200, ...before } },
+        },
+      );
+      const page = data.events;
+      if (!page || !Array.isArray(page.items))
+        throw new Problem(502, "CPA 持久化记录接口格式不兼容");
+      for (const x of page.items) {
+        const matches = channels.filter(
+          (c) =>
+            "openai-compatible-" + c.gateway.provider ===
+            x.auth_provider_snapshot,
+        );
+        if (matches.length !== 1) {
+          unmatched++;
+          continue;
+        }
+        const c = matches[0];
+        this.call(
+          source.id,
+          x.event_hash,
+          c,
+          x.requested_model || x.model,
+          new Date(x.timestamp_ms).toISOString(),
+          x.failed ? "failure" : "success",
+          {
+            errorType: x.failed
+              ? errorType(x.fail_summary, x.fail_status_code)
+              : null,
+            latency: x.latency_ms,
+            ttft: x.ttft_ms,
+            requestId: x.request_id,
+            summary: x.failed
+              ? `HTTP ${x.fail_status_code || "未知"} · ${errorType(x.fail_summary, x.fail_status_code)}`
+              : null,
+          },
+        );
+        records++;
+      }
+      if (!page.has_more) break;
+      if (
+        !page.next_before_ms ||
+        !page.next_before_id ||
+        (before.before_ms === page.next_before_ms &&
+          before.before_id === page.next_before_id)
+      )
+        throw new Problem(502, "CPA 分页游标没有前进，已停止同步");
+      before = {
+        before_ms: page.next_before_ms,
+        before_id: page.next_before_id,
+      };
+    }
+    this.store.setting(
+      "sources",
+      (this.store.setting("sources") || []).map((s) =>
+        s.id === source.id
+          ? {
+              ...s,
+              cursorMs: end - 1,
+              last: new Date().toISOString(),
+              error: null,
+              coverage: unmatched
+                ? `${unmatched} 条因凭据无法唯一关联而未计入；只读取 Manager 已存记录`
+                : "只读取 Manager 已存记录；账号反代不计入",
+            }
+          : s,
+      ),
+    );
+    this.center.recompute();
+    return { records, unmatched };
   }
   async sync(id) {
     const source = this.source(id);
+    if (source.kind === "cpa") return this.syncCpa(source);
     if (source.kind !== "newapi")
       throw new Problem(400, "该来源不提供调用日志同步");
     const serverStatus = await this.request(source, "/api/status");
@@ -367,7 +616,8 @@ export class Gateways {
         c.mode === "auto" &&
         c.gateway &&
         ["general", "media"].includes(c.category) &&
-        !["diff", "conflict", "failed"].includes(c.apply),
+        this.source(c.gateway.sourceId).kind === "newapi" &&
+        !["diff", "conflict", "failed", "pending"].includes(c.apply),
     )) {
       if (
         c.applied &&
@@ -376,18 +626,18 @@ export class Gateways {
       )
         continue;
       try {
-        await this.apply(c.id);
+        await this.apply(c.id, { automatic: true });
       } catch {
         /* apply persists an actionable failure on the channel */
       }
     }
   }
-  async scheduled() {
+  async scheduled(now = new Date()) {
     if (this.running) return;
     this.running = true;
     try {
-      for (const s of (this.store.setting("sources") || []).filter(
-        (s) => s.kind === "newapi",
+      for (const s of (this.store.setting("sources") || []).filter((s) =>
+        ["newapi", "cpa"].includes(s.kind),
       )) {
         try {
           await this.sync(s.id);
@@ -400,41 +650,159 @@ export class Gateways {
           );
         }
       }
-      if (Date.now() - (this.store.setting("evaluatedAt") || 0) >= 3600000) {
+      const previous = this.lastEligibilityCheck,
+        accounts = this.store.list("account");
+      const eligibilityChanged =
+        !previous ||
+        this.store.list("channel").some(
+          (c) =>
+            c.mode === "auto" &&
+            c.gateway &&
+            ["general", "media"].includes(c.category) &&
+            availability(
+              c,
+              accounts.find((a) => a.id === c.accountId),
+              now,
+            ) !==
+              availability(
+                c,
+                accounts.find((a) => a.id === c.accountId),
+                previous,
+              ),
+        );
+      if (
+        eligibilityChanged ||
+        now.getTime() - (this.store.setting("evaluatedAt") || 0) >= 3600000
+      ) {
         await this.recalculateAndApply();
-        this.store.setting("evaluatedAt", Date.now());
+        this.store.setting("evaluatedAt", now.getTime());
       }
+      this.lastEligibilityCheck = now;
     } finally {
       this.running = false;
     }
   }
   async inferenceToken(c, identity, expiry = -1, pinned = false) {
-    const source = this.source(c.gateway.sourceId);
-    if (source.kind !== "newapi")
-      throw new Problem(400, "该网关无法创建独立调用身份");
-    const identityId = `${c.id}:${identity}`,
+    const sourceId = c.gateway.sourceId;
+    const previous = this.provisioning.get(sourceId) || Promise.resolve();
+    const current = previous
+      .catch(() => {})
+      .then(() => this.provisionIdentity(c, identity, expiry, pinned));
+    this.provisioning.set(sourceId, current);
+    try {
+      return await current;
+    } finally {
+      if (this.provisioning.get(sourceId) === current)
+        this.provisioning.delete(sourceId);
+    }
+  }
+  async provisionIdentity(c, identity, expiry, pinned) {
+    const source = this.source(c.gateway.sourceId),
+      identityId = `${c.id}:${identity}`,
       old = this.store.get("identity", identityId);
-    if (old && !pinned)
+    if (old?.credentialId && !pinned) {
+      if (source.kind === "newapi") {
+        const token = await this.request(source, `/api/token/${old.tokenId}`);
+        if (token.model_limits !== c.models.join(",")) {
+          await this.request(source, "/api/token/", "PUT", {
+            ...token,
+            model_limits_enabled: true,
+            model_limits: c.models.join(","),
+          });
+          this.store.put("identity", {
+            ...old,
+            state: "generated",
+            verifiedAt: undefined,
+          });
+        }
+      }
       return {
         key: this.store.reveal(old.credentialId),
         tokenId: old.tokenId,
-        baseUrl: source.url + "/v1",
+        baseUrl: source.inferenceUrl || source.url + "/v1",
       };
-    const name = `arc-${randomUUID()}`;
-    await this.request(source, "/api/token/", "POST", {
-      name,
-      expired_time: expiry,
-      remain_quota: 0,
-      unlimited_quota: true,
-      model_limits_enabled: true,
-      model_limits: c.models.join(","),
-      group: c.group?.split(",")[0] || "default",
-      cross_group_retry: false,
-    });
-    const data = await this.pages(source, "/api/token/search", {
-      keyword: name,
-    });
-    const token = data.find((x) => x.name === name);
+    }
+    if (source.kind === "cpa") {
+      if (pinned)
+        throw new Problem(
+          400,
+          "CPA 没有已确认的固定渠道能力，评估请使用客户端直连连接",
+        );
+      const key = old?.pendingCredentialId
+        ? this.store.reveal(old.pendingCredentialId)
+        : "arc-" + randomBytes(32).toString("hex");
+      const pendingCredentialId =
+        old?.pendingCredentialId || this.store.secret(key);
+      this.store.put("identity", {
+        id: identityId,
+        channelId: c.id,
+        application: identity,
+        pendingCredentialId,
+        state: "preparing",
+      });
+      const response = await this.request(source, "/v0/management/api-keys"),
+        keys = response["api-keys"];
+      if (!Array.isArray(keys))
+        throw new Problem(502, "CPA 推理身份列表格式不兼容");
+      if (!keys.includes(key))
+        await this.request(source, "/v0/management/api-keys", "PUT", [
+          ...keys,
+          key,
+        ]);
+      const after = await this.request(source, "/v0/management/api-keys");
+      if (
+        !after["api-keys"]?.includes(key) ||
+        keys.some((k) => !after["api-keys"].includes(k))
+      )
+        throw new Problem(502, "CPA 身份回读未确认，原有推理身份需要核对");
+      this.store.put("identity", {
+        id: identityId,
+        channelId: c.id,
+        application: identity,
+        credentialId: pendingCredentialId,
+        state: "generated",
+      });
+      return { key, baseUrl: source.inferenceUrl };
+    }
+    if (source.kind !== "newapi")
+      throw new Problem(400, "该来源无法创建推理身份");
+    const name = old?.pendingName || `arc-${randomUUID()}`;
+    let token;
+    if (old?.pendingName) {
+      const existing = await this.pages(source, "/api/token/search", {
+        keyword: name,
+      });
+      token = existing.find((x) => x.name === name);
+      if (!token)
+        throw new Problem(
+          409,
+          "上次推理身份创建未确认，请在网关核对并处理后重试；没有重复创建",
+        );
+    } else {
+      this.store.put("identity", {
+        id: identityId,
+        channelId: c.id,
+        application: identity,
+        pendingName: name,
+        state: "preparing",
+      });
+      await this.request(source, "/api/token/", "POST", {
+        name,
+        expired_time: expiry,
+        remain_quota: 0,
+        unlimited_quota: true,
+        model_limits_enabled: true,
+        model_limits: c.models.join(","),
+        group: c.group?.split(",")[0] || "default",
+        cross_group_retry: false,
+      });
+    }
+    const data = token
+      ? [token]
+      : await this.pages(source, "/api/token/search", {
+          keyword: name,
+        });
+    token = data.find((x) => x.name === name);
     if (!token) throw new Problem(502, "推理身份创建结果不确定，请在网关核对");
     const dataKey = await this.request(
       source,
@@ -452,6 +820,7 @@ export class Gateways {
       tokenId: token.id,
       credentialId,
       expiry,
+      state: "generated",
     });
     return {
       key,

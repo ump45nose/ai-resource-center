@@ -43,7 +43,7 @@ function Shell() {
           </aside>
         </div>
       )}
-      <div className="lg:pl-56">
+      <div className="min-w-0 lg:pl-56">
         <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-zinc-200 bg-white/95 px-4 backdrop-blur sm:px-6">
           <button className="lg:hidden" aria-label="菜单" onClick={() => setMenu(true)}><Menu size={20} strokeWidth={1.6} /></button>
           <span className="font-semibold lg:hidden">AI 资源中心</span>
@@ -59,7 +59,7 @@ function Shell() {
         <div className="border-b border-zinc-200 bg-white px-4 py-2 sm:hidden">
           <div className="relative"><Search size={15} className="absolute left-2.5 top-2 text-zinc-400" /><input value={query} onChange={(e) => { setQuery(e.target.value); if (page !== 'resources') go('resources') }} placeholder="搜索站点、网址、模型" className="h-8 w-full rounded-md border border-zinc-200 bg-zinc-50 pl-8 text-sm outline-none" /></div>
         </div>
-        <main className="mx-auto max-w-[1360px] px-4 py-6 sm:px-6">
+        <main className="mx-auto min-w-0 max-w-[1360px] px-4 py-6 sm:px-6">
           {page === 'today' && <Today />}
           {page === 'resources' && <Resources />}
           {page === 'checkin' && <Checkin />}

@@ -20,15 +20,26 @@ export default function Today() {
   const daily = s.accounts.filter((a) => a.quota === "daily" && a.balance);
   const long = s.accounts.filter((a) => a.quota === "long" && a.balance);
   const unknown = s.accounts.filter((a) => a.balance === null).length;
-  const todo = s.accounts.filter((a) =>
-    ["待确认", "需登录", "需人工操作", "未执行", "失败"].includes(
-      a.checkin[TODAY]?.status,
-    ),
+  const todo = s.accounts.filter(
+    (a) =>
+      a.benefit.checkinSupported !== false &&
+      (a.benefit.checkinSupported === true ||
+        Object.values(a.checkin).some((r) =>
+          ["成功", "已签到"].includes(r.status),
+        )) &&
+      !["成功", "已签到"].includes(a.checkin[TODAY]?.status || ""),
   );
-  const expiring = s.accounts.filter((a) => a.expires && a.balance);
+  const expiring = s.accounts.filter(
+    (a) =>
+      a.validUntil &&
+      a.balance &&
+      new Date(a.validUntil).getTime() - Date.now() < 86400000,
+  );
 
   const prio = s.channels
-    .filter((c) => c.enabled && !["rp", "client"].includes(c.category))
+    .filter(
+      (c) => c.enabled && c.gateway && !["rp", "client"].includes(c.category),
+    )
     .map((c) => ({
       c,
       st: chanStatus(c, site(c.siteId), acct(c.accountId), s.rules),
@@ -46,14 +57,6 @@ export default function Today() {
     to: () => void;
   };
   const items: Todo[] = [];
-  const why: Record<string, string> = {
-    账号验证: "账号需验证，请登录站点完成验证",
-    "缺 key": "账号已有余额，但渠道未填写 key",
-    网站打不开: "站点无法访问（DNS 无响应），已暂停",
-    余额耗尽: "余额为 0，已从路由降为 0",
-    "HTTP 502": "近 1 小时 6 次 HTTP 502，已降权",
-    限流: "上游返回 429，自动降低频率",
-  };
   s.sites
     .filter((x) => x.issue)
     .forEach((x) => {
@@ -76,17 +79,37 @@ export default function Today() {
         reason:
           c.apply === "conflict"
             ? "409 版本冲突：酒馆中已被修改"
-            : c.applyMsg || "中心已保存，待在酒馆应用",
+            : c.applyMsg ||
+              (c.category === "rp"
+                ? "中心已保存，待在酒馆应用"
+                : "中心已保存，待应用配置"),
         act: "处理",
         to: () => go("resources", c.category === "rp" ? "rp" : "issue"),
       });
     });
+  s.sites.forEach((x) => {
+    const problems = s.channels.filter(
+      (c) =>
+        c.siteId === x.id &&
+        c.availability &&
+        !["账号暂停", "人工暂停"].includes(c.availability),
+    );
+    if (!problems.length) return;
+    items.push({
+      key: x.id + "call",
+      tone: "warn",
+      title: x.name + " 调用",
+      reason: [...new Set(problems.map((c) => c.availability))].join("；"),
+      act: "查看",
+      to: () => go("resources", "issue"),
+    });
+  });
   todo.forEach((a) => {
     items.push({
       key: a.id + "k",
       tone: "warn",
       title: `${site(a.siteId).name} 签到`,
-      reason: `今日${a.checkin[TODAY].status}`,
+      reason: `今日${a.checkin[TODAY]?.status || "尚未上报"}`,
       act: "去签到",
       to: () => go("checkin"),
     });
@@ -136,13 +159,16 @@ export default function Today() {
               todo
                 .map((a) => site(a.siteId).name)
                 .slice(0, 3)
-                .join("、") || "全部完成",
+                .join("、") ||
+              (s.accounts.length
+                ? "已上报结果无需处理"
+                : "尚未接入账号与签到来源"),
           },
           {
             l: "即将到期",
             v: String(expiring.length),
             d: expiring
-              .map((a) => `${site(a.siteId).name} ${a.expires}`)
+              .map((a) => `${site(a.siteId).name} ${a.validUntil}`)
               .slice(0, 2)
               .join("、"),
           },

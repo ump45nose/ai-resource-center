@@ -1,0 +1,13 @@
+{
+  "passed": true,
+  "checks": [
+    "native saved profile and next-request settings agree",
+    "unknown native fields preserved",
+    "fn receipt acknowledged and queue removed",
+    "pause aborts native generation before inference",
+    "zero backend or model probes during apply"
+  ],
+  "channelId": "3fc2ac61-2473-496e-8e02-cbeb394e14d4",
+  "acceptedVersion": 10,
+  "upstreamRequests": 0
+}

@@ -21,17 +21,17 @@ export default function Eval() {
     .filter((c) => ["general", "media"].includes(c.category))
     .sort((a, b) => b.priority - a.priority);
   const evalable = s.channels.filter(
-    (c) => c.category !== "rp" && (c.enabled || c.category === "client"),
+    (c) =>
+      c.category === "client" ||
+      (c.enabled && c.gateway && ["general", "media"].includes(c.category)),
   );
-  const [chId, setChId] = useState(
-    s.channels.find((c) => c.category !== "rp")?.id || "",
-  );
+  const [chId, setChId] = useState(evalable[0]?.id || "");
   const ch = s.channels.find((c) => c.id === chId)!;
   const [model, setModel] = useState(ch?.models[0] || "");
   const [client, setClient] = useState(
     ch?.protocol === "Anthropic" ? "Claude Code" : "OpenCode",
   );
-  const [title, setTitle] = useState("修复设置页表单校验");
+  const [title, setTitle] = useState("");
   const [cfg, setCfg] = useState<{ content: string } | null>(null);
   const [endDraft, setEndDraft] = useState<
     Record<string, { summary: string; rating: Evaluation["rating"] }>

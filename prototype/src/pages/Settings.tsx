@@ -23,10 +23,7 @@ export default function Settings() {
   const [rows, setRows] = useState<Row[]>(preview)
   const retry = (name: string) => {
     set((x) => ({ ...x, integrations: x.integrations.map((i) => (i.name === name ? { ...i, state: 'pending' } : i)) }))
-    setTimeout(() => {
-      set((x) => ({ ...x, integrations: x.integrations.map((i) => (i.name === name ? { ...i, state: 'ok', last: '刚刚', error: undefined } : i)) }))
-      toast(`${name} 同步成功`)
-    }, 900)
+    toast(`${name} 已排队检查；演示环境未发出请求`, 'info')
   }
   const confirm = () => {
     const picked = rows.filter((r) => r.pick)
@@ -35,9 +32,9 @@ export default function Settings() {
       picked.filter((r) => r.kind === '新增' || r.kind === '缺 key').forEach((r) => {
         const id = 'imp' + r.id
         if (sites.some((z) => z.id === id)) return
-        sites.push({ id, name: r.name, url: r.url, category: 'general', issue: r.kind === '缺 key' ? '缺 key' : undefined })
-        accounts.push({ ...x.accounts[1], id: 'a' + id, siteId: id, name: 'import@demo', balance: null, confirmedAt: '—' })
-        channels.push({ ...x.channels[1], id: 'c' + id, siteId: id, accountId: 'a' + id, name: r.name + '-通用', baseUrl: r.url + '/v1', keyMask: r.kind === '缺 key' ? '未填写' : 'sk-demo-••••imp1', enabled: r.kind !== '缺 key', samples: 0, success: null, priority: 0, reason: '新导入 · 待评价', version: 1, apply: 'pending', applyMsg: '新导入，待同步到 New API' })
+        sites.push({ id, name: r.name, url: r.url, issue: r.kind === '缺 key' ? '缺 key' : undefined })
+        accounts.push({ ...x.accounts[1], unit: 'USD', id: 'a' + id, siteId: id, name: 'import@demo', balance: null, confirmedAt: '—' })
+        channels.push({ ...x.channels[1], category: 'general', id: 'c' + id, siteId: id, accountId: 'a' + id, name: r.name + '-通用', baseUrl: r.url + '/v1', keyMask: r.kind === '缺 key' ? '未填写' : 'sk-demo-••••imp1', enabled: r.kind !== '缺 key', samples: 0, success: null, priority: 0, reason: '新导入 · 待评价', version: 1, apply: 'pending', applyMsg: '新导入，待同步到 New API' })
       })
       return { ...x, sites, accounts, channels }
     })
@@ -54,10 +51,10 @@ export default function Settings() {
               <li key={i.name} className="grid gap-2 px-4 py-3 text-sm sm:grid-cols-[160px_1fr_auto] sm:items-center">
                 <div className="font-medium">{i.name}</div>
                 <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2 text-xs"><Url href={i.url} />{i.state === 'ok' ? <Badge tone="ok">已连接</Badge> : i.state === 'failed' ? <Badge tone="err">同步失败</Badge> : <Badge tone="warn">待同步</Badge>}<span className="text-zinc-500">最后同步 {i.last}</span></div>
+                  <div className="flex flex-wrap items-center gap-2 text-xs">{i.url ? <Url href={i.url} /> : <span className="text-zinc-600">浏览器上报源</span>}{i.state === 'ok' ? <Badge tone="ok">已连接</Badge> : i.state === 'failed' ? <Badge tone="err">{i.kind === 'browser' ? '未上报' : '同步失败'}</Badge> : <Badge tone="warn">待同步</Badge>}{i.kind === 'browser' ? <span className="text-zinc-500">最近接收 {i.received} · 待交事件 {i.queued}</span> : <span className="text-zinc-500">最后同步 {i.last}</span>}</div>
                   {i.error && <div className="mt-1 text-xs text-red-700">原因：{i.error}</div>}
                 </div>
-                <Btn size="sm" onClick={() => retry(i.name)}><RefreshCw size={13} />{i.state === 'failed' ? '重试' : '同步'}</Btn>
+                {i.kind === 'browser' ? <span className="text-xs text-zinc-500">需在执行设备上打开浏览器扩展</span> : <Btn size="sm" onClick={() => retry(i.name)}><RefreshCw size={13} />检查连接</Btn>}
               </li>
             ))}
           </ul>
@@ -126,4 +123,3 @@ export default function Settings() {
     </div>
   )
 }
-

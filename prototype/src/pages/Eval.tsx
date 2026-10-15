@@ -9,8 +9,9 @@ export default function Eval() {
   const { s, set, toast } = useStore()
   const r = s.rules
   const site = (id: string) => s.sites.find((x) => x.id === id)!
-  const pub = s.channels.filter((c) => ['general', 'media'].includes(site(c.siteId).category)).sort((a, b) => b.priority - a.priority)
-  const evalable = s.channels.filter((c) => c.enabled || site(c.siteId).category === 'client')
+  const pub = s.channels.filter((c) => ['general', 'media'].includes(c.category)).sort((a, b) => b.priority - a.priority)
+  // RP 连接只人工维护：不参与任务评估，也不进入公共网关评分
+  const evalable = s.channels.filter((c) => c.category !== 'rp' && (c.enabled || c.category === 'client'))
   const [chId, setChId] = useState('c1')
   const ch = s.channels.find((c) => c.id === chId)!
   const [model, setModel] = useState(ch.models[0])
@@ -23,7 +24,7 @@ export default function Eval() {
 
   return (
     <div>
-      <PageHead title="渠道评价" desc={`默认规则：近 ${r.days} 天 · 至少 ${r.samples} 样本 · 观测成功率 ≥${r.good}% 开放，<${r.warn}% 降级；样本不足保留原路由`} />
+      <PageHead title="渠道评价" desc={`优先级：当日优 400 · 当日常规 300 · 长期优 200 · 长期常规 100 · 备用 0；默认规则：近 ${r.days} 天 · 至少 ${r.samples} 样本 · 观测成功率 ≥${r.good}% 开放，<${r.warn}% 降级；样本不足保留原路由`} />
       <Section title="公共网关渠道（New API 自动调整）" desc="RP 与客户端绑定资源不进入公共网关调整">
         <div className="overflow-x-auto">
           <table className="hidden w-full text-sm md:table">
@@ -69,11 +70,11 @@ export default function Eval() {
       </Section>
 
       <div className="mt-5 grid gap-5 xl:grid-cols-[360px_1fr]">
-        <Section title="人工任务评估" desc="在你现有的 Agent 中执行；中心只登记，不启动 Agent">
+        <Section title="人工任务评估" desc="在你现有的 Agent 中执行；中心只登记，不启动 Agent。RP 连接不参与评估">
           <div className="grid gap-3 p-4">
             <Field label="渠道"><select className={inputCls} value={chId} onChange={(e) => { setChId(e.target.value); setModel(s.channels.find((c) => c.id === e.target.value)!.models[0]) }}>{evalable.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>
             <Field label="模型"><select className={inputCls} value={model} onChange={(e) => setModel(e.target.value)}>{ch.models.map((m) => <option key={m}>{m}</option>)}</select></Field>
-            <Field label="客户端"><select className={inputCls} value={client} onChange={(e) => setClient(e.target.value)}>{['Claude Code', 'Codex', 'OpenCode'].map((m) => <option key={m}>{m}</option>)}</select></Field>
+            <Field label="客户端"><select className={inputCls} value={client} onChange={(e) => setClient(e.target.value)}>{['Claude Code', 'Codex', 'OpenCode', 'Magpie', 'Hermes Chat', 'Hermes Cron'].map((m) => <option key={m}>{m}</option>)}</select></Field>
             <Field label="任务标题"><input className={inputCls} value={title} onChange={(e) => setTitle(e.target.value)} /></Field>
             <Btn kind="primary" disabled={!title.trim()} onClick={() => setCfg(true)}><ClipboardCheck size={14} />准备评估配置</Btn>
           </div>
@@ -115,4 +116,3 @@ export default function Eval() {
     </div>
   )
 }
-

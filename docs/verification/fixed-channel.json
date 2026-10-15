@@ -1,0 +1,12 @@
+{
+  "passed": true,
+  "fixedFailureStatus": 500,
+  "requestsToFailingChannel": 1,
+  "backupUsedForFailedRequest": false,
+  "centerStoppedInferenceStatus": 200,
+  "ownedChannelIds": [
+    184,
+    185
+  ],
+  "ownedTokenId": 4
+}

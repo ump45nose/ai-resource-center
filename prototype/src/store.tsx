@@ -40,20 +40,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     updChannel(id, { ...p, apply: 'saving', applyMsg: undefined })
     setTimeout(() => {
       const v = c.version + 1
-      if (site.category === 'rp') {
+      if (c.category === 'rp') {
         updChannel(id, { version: v, apply: 'pending', applyMsg: '已保存到中心，待在酒馆应用' })
         toast(`已保存 v${v}，酒馆待应用`, 'info')
-      } else if (site.category === 'client') {
+      } else if (c.category === 'client') {
         updChannel(id, { version: v, apply: 'synced', clientState: 'draft', applyMsg: '配置已变更，需重新生成并由客户端确认' })
         toast(`已保存 v${v}，需重新生成客户端配置`, 'info')
-      } else if (c.id === 'c7') {
-        updChannel(id, { version: v, apply: 'failed', applyMsg: 'New API 返回：渠道 #7 更新失败，上游权重字段被锁定，请在 New API 后台解锁后重试' })
-        toast(`中心已保存 v${v}，但网关生效失败`, 'err')
       } else {
-        updChannel(id, { version: v, apply: 'synced', applyMsg: `v${v} 已在 New API 生效` })
-        toast(`保存成功 v${v}，New API 已生效`)
+        // 演示环境不连接 New API：只写入中心数据，不伪造“已生效”
+        updChannel(id, { version: v, apply: 'pending', applyMsg: `v${v} 已保存到中心；演示环境未连接 New API，待同步` })
+        toast(`保存成功 v${v}，待同步到 New API`, 'info')
       }
-    }, 1000)
+    }, 400)
   }
   const go = (p: string, sb = 'all') => {
     setPage(p)
@@ -66,4 +64,3 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     </Ctx.Provider>
   )
 }
-

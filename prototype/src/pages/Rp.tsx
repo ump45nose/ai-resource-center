@@ -11,8 +11,7 @@ export default function RpView() {
   const [conf, setConf] = useState<string | null>(null)
   const [drag, setDrag] = useState<string | null>(null)
   const [lastSave, setLastSave] = useState('09:15 · v3')
-  const rpSites = s.sites.filter((x) => x.category === 'rp').map((x) => x.id)
-  const list = s.channels.filter((c) => rpSites.includes(c.siteId)).sort((a, b) => a.order - b.order)
+  const list = s.channels.filter((c) => c.category === 'rp').sort((a, b) => a.order - b.order)
   const reorder = (ids: string[]) => {
     set((x) => ({ ...x, channels: x.channels.map((c) => { const i = ids.indexOf(c.id); return i < 0 ? c : { ...c, order: i + 1, apply: c.apply === 'conflict' ? c.apply : c.order !== i + 1 ? 'pending' : c.apply, applyMsg: c.order !== i + 1 ? `排序调整为第 ${i + 1}，待应用` : c.applyMsg } }) }))
   }
@@ -23,14 +22,14 @@ export default function RpView() {
   }
   const add = () => {
     const id = 'rp' + Date.now()
-    const nc: Channel = { ...list[0], id, name: '新 RP 连接', models: ['claude-sonnet-4'], keyMask: 'sk-demo-••••new0', note: '', rating: '', version: 1, apply: 'pending', applyMsg: '新建，待在酒馆应用', order: list.length + 1, enabled: true, external: undefined }
+    const nc: Channel = { ...list[0], category: 'rp', id, name: '新 RP 连接', models: ['claude-sonnet-4'], keyMask: 'sk-demo-••••new0', note: '', rating: '', version: 1, apply: 'pending', applyMsg: '新建，待在酒馆应用', order: list.length + 1, enabled: true, external: undefined }
     set((x) => ({ ...x, channels: [...x.channels, nc] })); setEdit(id); toast('已添加（未发出任何请求）', 'info')
   }
   const pending = list.filter((c) => c.apply === 'pending' || c.apply === 'failed')
   const current = list.find((c) => c.enabled)
   const applyAll = () => {
     pending.forEach((c) => updChannel(c.id, { apply: 'synced', applyMsg: `v${c.version} 已在酒馆应用` }))
-    setLastSave(`刚刚 · ${pending.length} 项`); toast(`已在酒馆应用 ${pending.length} 项修改`)
+    setLastSave(`刚刚 · ${pending.length} 项`); toast(`预览：模拟在酒馆端应用 ${pending.length} 项`, 'info')
   }
 
   return (
@@ -77,7 +76,7 @@ export default function RpView() {
       </Section>
 
       <div className="rounded-lg border border-zinc-300 bg-[#1f2126] text-zinc-200">
-        <div className="flex items-center justify-between border-b border-zinc-700 px-4 py-2.5 text-xs"><span className="font-medium">酒馆面板预览 · API 连接</span><span className="text-zinc-400">局部</span></div>
+        <div className="flex items-center justify-between border-b border-zinc-700 px-4 py-2.5 text-xs"><span className="font-medium">酒馆面板预览 · API 连接</span><span className="text-zinc-400">模拟酒馆端操作</span></div>
         <div className="space-y-3 p-4 text-xs">
           <div><div className="text-zinc-400">当前连接</div><div className="mt-1 rounded bg-zinc-800 px-2 py-1.5 font-mono">{current ? `${current.name} · ${current.models[0]}` : '无可用连接'}</div></div>
           <div><div className="text-zinc-400">上次保存</div><div className="mt-1">{lastSave}</div></div>
@@ -98,4 +97,3 @@ export default function RpView() {
     </div>
   )
 }
-

@@ -15,6 +15,31 @@ import { Badge, Btn, Section, ApplyBadge, inputCls, Url } from "../ui";
 import { ChannelDrawer, ConflictDrawer } from "../shared";
 import type { Channel } from "../data";
 import { NewConnection } from "../NewConnection";
+function RpNote({
+  channel,
+  save,
+}: {
+  channel: Channel;
+  save: (note: string, version: number) => Promise<unknown>;
+}) {
+  const [note, setNote] = useState(channel.note),
+    [version, setVersion] = useState(channel.version);
+  return (
+    <input
+      className={inputCls + " mt-2 h-7 text-xs"}
+      placeholder="备注"
+      value={note}
+      onFocus={() => {
+        setNote(channel.note);
+        setVersion(channel.version);
+      }}
+      onChange={(e) => setNote(e.target.value)}
+      onBlur={() => {
+        if (note !== channel.note) void save(note, version);
+      }}
+    />
+  );
+}
 
 export default function RpView() {
   const { s, act, toast } = useStore();
@@ -83,7 +108,6 @@ export default function RpView() {
                 ids.splice(ids.indexOf(c.id), 0, drag);
                 reorder(ids);
                 setDrag(null);
-                toast("拖拽排序已更新，待应用", "info");
               }}
               className={`grid grid-cols-[24px_1fr] gap-3 border-b border-zinc-100 px-4 py-3 last:border-0 sm:grid-cols-[24px_28px_1fr_auto] ${drag === c.id ? "opacity-50" : ""} ${!c.enabled ? "bg-zinc-50" : ""}`}
             >
@@ -121,11 +145,15 @@ export default function RpView() {
                   <span className="font-mono">{c.models.join(", ")}</span> · v
                   {c.version}
                 </div>
-                <input
-                  className={inputCls + " mt-2 h-7 text-xs"}
-                  placeholder="备注"
-                  value={c.note}
-                  onChange={(e) => updChannel(c.id, { note: e.target.value })}
+                <RpNote
+                  channel={c}
+                  save={(note, version) =>
+                    act(
+                      `/channels/${c.id}`,
+                      { expectedVersion: version, patch: { note } },
+                      "PATCH",
+                    )
+                  }
                 />
                 {c.applyMsg && c.apply !== "synced" && (
                   <div className="mt-1 text-xs text-amber-700">
@@ -142,7 +170,6 @@ export default function RpView() {
                     updChannel(c.id, {
                       rating: e.target.value as Channel["rating"],
                     });
-                    toast("人工评价已记录");
                   }}
                 >
                   <option value="">未评</option>
@@ -170,10 +197,6 @@ export default function RpView() {
                   size="sm"
                   onClick={() => {
                     updChannel(c.id, { enabled: !c.enabled });
-                    toast(
-                      c.enabled ? "已暂停，待应用" : "已恢复，待应用",
-                      "info",
-                    );
                   }}
                 >
                   {c.enabled ? (

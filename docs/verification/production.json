@@ -1,0 +1,38 @@
+{
+  "sites": 136,
+  "accounts": 186,
+  "channels": 185,
+  "categories": {
+    "general": 130,
+    "media": 11,
+    "rp": 40,
+    "client": 4
+  },
+  "received": {
+    "allApiHub": "2026-10-15T02:28:41.155Z",
+    "sillyTavern": null
+  },
+  "calls": [
+    {
+      "source": "cpa",
+      "count": 103,
+      "latest": "2026-10-14T11:01:48.484Z"
+    },
+    {
+      "source": "new-api",
+      "count": 28,
+      "latest": "2026-10-14T14:15:19.000Z"
+    }
+  ],
+  "automaticChannels": 0,
+  "passed": true,
+  "centerTests": 15,
+  "allApiHubRelatedChecks": 25,
+  "sillyTavernTests": 46,
+  "productionAccountObservationsAcknowledged": 77,
+  "productionOutboxRemaining": 0,
+  "productionRpBinding": "awaiting user profile selection",
+  "pendingAssociations": 1,
+  "publicRpProbes": 0,
+  "image": "sha256:3970041b922ba4a0b72513109d0e966b7cc44da24811533722d0e3c52c5e6520"
+}

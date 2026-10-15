@@ -11,8 +11,10 @@ import {
   ApplyBadge,
   inputCls,
   Empty,
+  Drawer,
+  Field,
 } from "../ui";
-import { ChannelDrawer, ConflictDrawer } from "../shared";
+import { ChannelDrawer, ConflictDrawer, ConfigDrawer } from "../shared";
 import { catLabel, type Site, type Channel } from "../data";
 import RpView from "./Rp";
 import ClientView from "./Client";
@@ -37,7 +39,8 @@ export function isIssue(site: Site, chans: Channel[]) {
 }
 
 export default function Resources() {
-  const { s, sub, go, query, setQuery } = useStore();
+  const { s, act, sub, go, query, setQuery } = useStore();
+  const [siteEdit, setSiteEdit] = useState<Site | null>(null);
   const [newOpen, setNewOpen] = useState(false);
   const [proto, setProto] = useState("");
   const [prob, setProb] = useState("");
@@ -172,7 +175,18 @@ export default function Resources() {
                       className={`mt-0.5 text-zinc-400 transition lg:mt-0 ${isOpen ? "rotate-90" : ""}`}
                     />
                     <div className="min-w-0">
-                      <div className="font-medium text-zinc-900">{x.name}</div>
+                      <div className="flex items-center gap-2 font-medium text-zinc-900">
+                        {x.name}
+                        <button
+                          aria-label={`编辑站点 ${x.name}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSiteEdit({ ...x });
+                          }}
+                        >
+                          <Pencil size={12} />
+                        </button>
+                      </div>
                       <div className="text-xs">
                         <Url href={x.url} />
                       </div>
@@ -214,13 +228,21 @@ export default function Resources() {
                           {x.issue}
                         </Badge>
                       ) : (
-                        <Badge tone="ok">正常</Badge>
+                        <Badge tone="info">未记录网站问题</Badge>
                       )}
-                      {cs
-                        .filter((c) => c.apply !== "synced")
-                        .map((c) => (
-                          <ApplyBadge key={c.id} a={c.apply} cat={c.category} />
-                        ))}
+                      {[
+                        ...new Set(
+                          cs
+                            .filter((c) => c.apply !== "synced")
+                            .map((c) => c.apply),
+                        ),
+                      ].map((a) => (
+                        <ApplyBadge
+                          key={a}
+                          a={a}
+                          cat={cs.find((c) => c.apply === a)!.category}
+                        />
+                      ))}
                     </div>
                   </div>
                   {isOpen && (
@@ -274,6 +296,92 @@ export default function Resources() {
           </Section>
         </>
       )}
+      <Drawer
+        open={!!siteEdit}
+        onClose={() => setSiteEdit(null)}
+        title="编辑站点"
+        footer={
+          <Btn
+            kind="primary"
+            onClick={() => {
+              if (siteEdit)
+                void act(
+                  `/sites/${siteEdit.id}`,
+                  {
+                    name: siteEdit.name,
+                    url: siteEdit.url,
+                    checkinUrl: siteEdit.checkinUrl || null,
+                    aliases: siteEdit.aliases || [],
+                    siteDown: siteEdit.siteDown || false,
+                    issue: siteEdit.issue || null,
+                  },
+                  "PATCH",
+                ).then((r) => {
+                  if (r) setSiteEdit(null);
+                });
+            }}
+          >
+            保存
+          </Btn>
+        }
+      >
+        {siteEdit && (
+          <div className="grid gap-4">
+            <Field label="名称">
+              <input
+                className={inputCls}
+                value={siteEdit.name}
+                onChange={(e) =>
+                  setSiteEdit({ ...siteEdit, name: e.target.value })
+                }
+              />
+            </Field>
+            <Field label="网站地址">
+              <input
+                className={inputCls}
+                value={siteEdit.url}
+                onChange={(e) =>
+                  setSiteEdit({ ...siteEdit, url: e.target.value })
+                }
+              />
+            </Field>
+            <Field label="签到入口">
+              <input
+                className={inputCls}
+                value={siteEdit.checkinUrl || ""}
+                onChange={(e) =>
+                  setSiteEdit({ ...siteEdit, checkinUrl: e.target.value })
+                }
+              />
+            </Field>
+            <Field label="站点别名地址（每行一个）">
+              <textarea
+                className={inputCls}
+                value={(siteEdit.aliases || []).join("\n")}
+                onChange={(e) =>
+                  setSiteEdit({
+                    ...siteEdit,
+                    aliases: e.target.value.split("\n").filter(Boolean),
+                  })
+                }
+              />
+            </Field>
+            <Field label="网站问题（恢复后清空）">
+              <input
+                className={inputCls}
+                value={siteEdit.issue || ""}
+                onChange={(e) =>
+                  setSiteEdit({
+                    ...siteEdit,
+                    issue: e.target.value,
+                    siteDown: !!e.target.value,
+                  })
+                }
+              />
+            </Field>
+          </div>
+        )}
+      </Drawer>
       <NewConnection
         open={newOpen}
         onClose={() => setNewOpen(false)}
@@ -299,6 +407,8 @@ function ChannelRow({
   onConflict: () => void;
 }) {
   const { s, updChannel, toast, act } = useStore();
+  const [configClient, setConfigClient] = useState("Magpie"),
+    [configOpen, setConfigOpen] = useState(false);
   const st = chanStatus(
     c,
     site,
@@ -329,6 +439,14 @@ function ChannelRow({
             </span>
           ))}
         </div>
+        {c.category === "general" && (
+          <div className="mt-1 text-blue-700">
+            {c.models.filter((m) => /gpt|deepseek/i.test(m)).length > 0 &&
+              "GPT / DeepSeek 建议用于 Code。"}
+            {c.models.filter((m) => /claude|kimi/i.test(m)).length > 0 &&
+              "Claude / Kimi 建议用于 RP；选择后迁移。"}
+          </div>
+        )}
         <div className="mt-1 text-zinc-500">
           凭据{" "}
           <span
@@ -356,6 +474,34 @@ function ChannelRow({
         )}
       </div>
       <div className="flex flex-wrap gap-1 md:justify-end">
+        {c.category !== "rp" && (
+          <>
+            <select
+              className="h-7 max-w-32 rounded border text-xs"
+              value={configClient}
+              onChange={(e) => setConfigClient(e.target.value)}
+            >
+              {[
+                "Magpie",
+                "Claude Code",
+                "Codex",
+                "OpenCode",
+                "Hermes Chat",
+                "Hermes Cron",
+              ].map((x) => (
+                <option key={x}>{x}</option>
+              ))}
+            </select>
+            <Btn
+              size="sm"
+              disabled={["general", "media"].includes(c.category) && !c.gateway}
+              onClick={() => setConfigOpen(true)}
+            >
+              生成配置
+            </Btn>
+          </>
+        )}
+
         {c.apply === "conflict" && (
           <Btn size="sm" kind="danger" onClick={onConflict}>
             <GitCompare size={13} />
@@ -404,6 +550,38 @@ function ChannelRow({
           编辑
         </Btn>
       </div>
+      {configOpen && (
+        <ConfigDrawer
+          id={c.id}
+          client={configClient}
+          title="客户端配置"
+          onClose={() => setConfigOpen(false)}
+        />
+      )}
+      {(s.identities || [])
+        .filter((i) => i.channelId === c.id)
+        .map((i) => (
+          <div key={i.id} className="text-xs text-zinc-600">
+            {i.application} ·{" "}
+            {i.state === "verified"
+              ? "真实任务已确认"
+              : "配置已生成，待客户端确认"}{" "}
+            {i.state !== "verified" && (
+              <Btn
+                size="sm"
+                onClick={() => {
+                  const summary = window.prompt("真实任务结果摘要");
+                  if (summary)
+                    void act(`/identities/${encodeURIComponent(i.id)}/verify`, {
+                      summary,
+                    });
+                }}
+              >
+                登记实际生效
+              </Btn>
+            )}
+          </div>
+        ))}
     </div>
   );
 }

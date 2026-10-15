@@ -229,19 +229,13 @@ export function chanStatus(
   acct: Account | undefined,
   rules: Rules,
 ): { label: string; tone: Tone; icon?: typeof CheckCircle2 } {
-  if (!c.enabled)
-    return {
-      label: c.keyMask === "未填写" ? "缺 key · 暂停" : "已暂停",
-      tone: "mute",
-      icon: PauseCircle,
-    };
   if (c.availability)
     return {
       label: c.availability,
       tone: c.availability.includes("限流") ? "warn" : "err",
     };
-  if (site.issue === "限流") return { label: "限流", tone: "warn" };
-  if (site.issue) return { label: site.issue, tone: "err" };
+  if (!c.enabled) return { label: "已暂停", tone: "mute", icon: PauseCircle };
+
   if (acct && acct.balance === 0) return { label: "余额耗尽", tone: "err" };
   if (c.category === "rp")
     return { label: "人工固定", tone: "info", icon: CheckCircle2 };
@@ -259,6 +253,8 @@ export function chanStatus(
 export function ApplyBadge({ a, cat }: { a: ApplyState; cat?: string }) {
   const tav = cat === "rp";
   switch (a) {
+    case "saved":
+      return <Badge tone="mute">已记录</Badge>;
     case "saving":
       return (
         <Badge tone="info" icon={Loader2}>

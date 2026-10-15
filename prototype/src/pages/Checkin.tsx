@@ -41,7 +41,7 @@ export default function Checkin() {
                 <div className="text-xs">{site.checkinUrl ? <><span className="text-zinc-500">独立入口 </span><Url href={site.checkinUrl} /></> : <Url href={site.url + '/console/personal'}>{site.url.replace(/^https?:\/\//, '')}/console/personal</Url>}</div>
                 <div><Badge tone={tone[r.status]}>{r.status}</Badge></div>
                 <div className="text-xs">{ok ? (r.reward ? <span className="tabular-nums">{r.reward}</span> : <Badge tone="warn">奖励待确认</Badge>) : r.note ? <span className="text-red-700">{r.note}</span> : '—'}</div>
-                <div className="text-xs text-zinc-600">{a.benefit.pool === 'daily' ? '每日池' : '长期池'} · {a.benefit.validity}{a.benefit.drops && <div>投放 {a.benefit.drops}</div>}</div>
+                <div className="text-xs text-zinc-600">{a.benefit.pool === 'daily' ? '每日池' : '长期池'} · 有效期 {a.benefit.validity}{a.benefit.drops && <div>投放 {a.benefit.drops}</div>}<div>窗口 {a.benefit.window || '待确认'}</div></div>
                 <div className="flex flex-wrap gap-1 lg:justify-end">
                   {date === TODAY && !ok && r.status !== '无法签到' && <Btn size="sm" onClick={() => { updAccount(a.id, { checkin: { ...a.checkin, [date]: { status: '成功' } } }); toast(`${site.name} 已登记手动签到，奖励待确认`, 'info') }}>登记已签</Btn>}
                   {date === TODAY && ok && !r.reward && <Btn size="sm" onClick={() => { updAccount(a.id, { checkin: { ...a.checkin, [date]: { ...r, reward: '$1.00' } } }); toast('奖励已确认 $1.00') }}>确认奖励</Btn>}
@@ -51,12 +51,12 @@ export default function Checkin() {
             )
           })}
         </Section>
-        <Section title="示例：AgentRouter 投放">
+        <Section title="示例：AgentRouter 投放（客户端绑定 · Claude Code）">
           <div className="space-y-2 p-4 text-sm">
             <p className="text-zinc-700">投放时刻：北京时间 <b>10:00</b>、<b>19:00</b></p>
-            <p className="text-zinc-600">每次投放额度进入每日池；可用窗口仅按站点公告明确的「至当日 24:00」记录。</p>
-            <p className="rounded bg-amber-50 px-2 py-1.5 text-xs text-amber-800">投放时刻不推导结束时刻。未明确窗口的站点显示「窗口未知」。</p>
-            <div className="mt-2 grid grid-cols-[60px_1fr] gap-y-1 text-xs text-zinc-600"><span>10:00</span><span>第一次投放 · 已到账</span><span>19:00</span><span>第二次投放 · 未到时刻</span></div>
+            <p className="text-zinc-600">站点限制仅 Claude Code 客户端使用。结束时间与有效期：<b>待确认</b>；开放窗口：<b>待确认</b>。</p>
+            <p className="rounded bg-amber-50 px-2 py-1.5 text-xs text-amber-800">投放时刻不推导结束时刻。未明确窗口的站点显示「待确认」。</p>
+            <div className="mt-2 grid grid-cols-[60px_1fr] gap-y-1 text-xs text-zinc-600"><span>10:00</span><span>投放时刻 · 结束时间待确认</span><span>19:00</span><span>投放时刻 · 结束时间待确认</span></div>
           </div>
         </Section>
       </div>
@@ -69,7 +69,7 @@ export default function Checkin() {
             <Field label="重置时区"><select className={inputCls} value={bf.tz} onChange={(e) => setBf({ ...bf, tz: e.target.value })}>{['Asia/Shanghai', 'UTC', 'America/Los_Angeles'].map((t) => <option key={t}>{t}</option>)}</select></Field>
             <Field label="签到余额门槛"><input className={inputCls} value={bf.threshold} onChange={(e) => setBf({ ...bf, threshold: e.target.value })} /></Field>
             <Field label="投放时刻" hint="只记录投放时刻，不推导结束时刻"><input className={inputCls} placeholder="如 北京时间 10:00、19:00" value={bf.drops} onChange={(e) => setBf({ ...bf, drops: e.target.value })} /></Field>
-            <Field label="明确可用窗口" hint="仅填写站点明确公布的窗口；留空显示「窗口未知」"><input className={inputCls} value={bf.window} onChange={(e) => setBf({ ...bf, window: e.target.value })} /></Field>
+            <Field label="明确可用窗口" hint="仅填写站点明确公布的窗口；留空显示「待确认」"><input className={inputCls} value={bf.window} onChange={(e) => setBf({ ...bf, window: e.target.value })} /></Field>
           </div>
         )}
       </Drawer>

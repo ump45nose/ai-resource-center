@@ -32,6 +32,7 @@ export default function Checkin() {
   const [stf, setStf] = useState("");
   const [edit, setEdit] = useState<string | null>(null);
   const [bf, setBf] = useState<Benefit | null>(null);
+  const [until, setUntil] = useState("");
   const rows = s.accounts.filter(
     (a) => !stf || a.checkin[date]?.status === stf,
   );
@@ -89,7 +90,11 @@ export default function Checkin() {
           </div>
           {rows.map((a) => {
             const site = s.sites.find((x) => x.id === a.siteId)!;
-            const r = a.checkin[date] || { status: "未执行" as CheckinStatus };
+            const r = a.checkin[date] || {
+              status: (a.benefit.checkinSupported === false
+                ? "无法签到"
+                : "待确认") as CheckinStatus,
+            };
             const ok = r.status === "成功" || r.status === "已签到";
             return (
               <div
@@ -168,6 +173,17 @@ export default function Checkin() {
                     onClick={() => {
                       setEdit(a.id);
                       setBf(a.benefit);
+                      setUntil(
+                        a.validUntil
+                          ? new Date(
+                              new Date(a.validUntil).getTime() -
+                                new Date(a.validUntil).getTimezoneOffset() *
+                                  60000,
+                            )
+                              .toISOString()
+                              .slice(0, 16)
+                          : "",
+                      );
                     }}
                   >
                     <Pencil size={13} />
@@ -207,7 +223,10 @@ export default function Checkin() {
             <Btn
               kind="primary"
               onClick={() => {
-                void updAccount(ea!.id, { benefit: bf! }).then((r) => {
+                void updAccount(ea!.id, {
+                  benefit: bf!,
+                  validUntil: until ? new Date(until).toISOString() : null,
+                }).then((r) => {
                   if (r) setEdit(null);
                 });
               }}
@@ -231,6 +250,61 @@ export default function Checkin() {
                 <option value="long">长期池</option>
               </select>
             </Field>
+            <Field label="是否可以签到">
+              <select
+                className={inputCls}
+                value={
+                  bf.checkinSupported === true
+                    ? "yes"
+                    : bf.checkinSupported === false
+                      ? "no"
+                      : "unknown"
+                }
+                onChange={(e) =>
+                  setBf({
+                    ...bf,
+                    checkinSupported:
+                      e.target.value === "yes"
+                        ? true
+                        : e.target.value === "no"
+                          ? false
+                          : null,
+                  })
+                }
+              >
+                <option value="unknown">待确认</option>
+                <option value="yes">可以签到</option>
+                <option value="no">无法签到（仅标注）</option>
+              </select>
+            </Field>
+            <Field
+              label="每日重置时刻"
+              hint="确认每日池及时区后填写，新的余额观察会计算下一次重置；未知时留空"
+            >
+              <input
+                type="time"
+                className={inputCls}
+                value={bf.resetAt || ""}
+                onChange={(e) =>
+                  setBf({ ...bf, resetAt: e.target.value || undefined })
+                }
+              />
+            </Field>
+            <Field
+              label={`明确截止时间（浏览器时区 ${Intl.DateTimeFormat().resolvedOptions().timeZone}）`}
+            >
+              <input
+                type="datetime-local"
+                className={inputCls}
+                value={until}
+                onChange={(e) => setUntil(e.target.value)}
+              />
+            </Field>
+            {bf.ruleText && (
+              <div className="whitespace-pre-wrap rounded bg-zinc-50 p-3 text-sm">
+                来源规则：{bf.ruleText}
+              </div>
+            )}
             <Field label="有效期">
               <input
                 className={inputCls}
@@ -266,7 +340,7 @@ export default function Checkin() {
               />
             </Field>
             <Field
-              label="明确可用窗口"
+              label="可用窗口说明"
               hint="仅填写站点明确公布的窗口；留空显示「窗口未知」"
             >
               <input
@@ -274,6 +348,66 @@ export default function Checkin() {
                 value={bf.window}
                 onChange={(e) => setBf({ ...bf, window: e.target.value })}
               />
+            </Field>
+            <Field
+              label="已确认的可用窗口"
+              hint="填写开始与结束时刻，使用上面的重置时区；跨午夜窗口支持。留空不限制调用。"
+            >
+              {(bf.windows || []).map((w, i) => (
+                <div key={i} className="flex gap-2">
+                  <input
+                    aria-label="窗口开始"
+                    type="time"
+                    className={inputCls}
+                    value={w.start}
+                    onChange={(e) =>
+                      setBf({
+                        ...bf,
+                        windows: bf.windows!.map((x, j) =>
+                          j === i ? { ...x, start: e.target.value } : x,
+                        ),
+                      })
+                    }
+                  />
+                  <input
+                    aria-label="窗口结束"
+                    type="time"
+                    className={inputCls}
+                    value={w.end}
+                    onChange={(e) =>
+                      setBf({
+                        ...bf,
+                        windows: bf.windows!.map((x, j) =>
+                          j === i ? { ...x, end: e.target.value } : x,
+                        ),
+                      })
+                    }
+                  />
+                  <Btn
+                    onClick={() =>
+                      setBf({
+                        ...bf,
+                        windows: bf.windows!.filter((_, j) => j !== i),
+                      })
+                    }
+                  >
+                    移除
+                  </Btn>
+                </div>
+              ))}
+              <Btn
+                onClick={() =>
+                  setBf({
+                    ...bf,
+                    windows: [
+                      ...(bf.windows || []),
+                      { start: "10:00", end: "19:00" },
+                    ],
+                  })
+                }
+              >
+                添加已确认窗口
+              </Btn>
             </Field>
           </div>
         )}

@@ -8,8 +8,8 @@ export function HeaderEditor({ headers, onChange }: { headers: Header[]; onChang
   const [json, setJson] = useState(false)
   const obj = Object.fromEntries(headers.filter((h) => h.name).map((h) => [h.name, h.value]))
   return (
-    <div>
-      <div className="mb-2 flex items-center justify-between">
+    <div className="min-w-0">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <span className="text-xs font-medium text-zinc-600">请求头（不含认证）</span>
         <div className="flex gap-1">
           <Btn size="sm" kind={json ? 'ghost' : 'default'} onClick={() => setJson(false)}><Table2 size={13} />表格</Btn>
@@ -17,14 +17,14 @@ export function HeaderEditor({ headers, onChange }: { headers: Header[]; onChang
         </div>
       </div>
       {json ? (
-        <pre className="overflow-x-auto rounded-md bg-zinc-50 p-3 font-mono text-xs text-zinc-800 ring-1 ring-zinc-200">{JSON.stringify(obj, null, 2)}</pre>
+        <pre className="max-w-full overflow-x-auto whitespace-pre rounded-md bg-zinc-50 p-3 font-mono text-xs text-zinc-800 ring-1 ring-zinc-200">{JSON.stringify(obj, null, 2)}</pre>
       ) : (
         <div className="rounded-md ring-1 ring-zinc-200">
-          <div className="grid grid-cols-[1fr_1fr_32px] gap-2 border-b border-zinc-200 bg-zinc-50 px-2 py-1.5 text-xs text-zinc-500">
+          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_32px] gap-2 border-b border-zinc-200 bg-zinc-50 px-2 py-1.5 text-xs text-zinc-500">
             <span>名称</span><span>值</span><span />
           </div>
           {headers.map((h, i) => (
-            <div key={i} className="grid grid-cols-[1fr_1fr_32px] items-center gap-2 border-b border-zinc-100 px-2 py-1.5 last:border-0">
+            <div key={i} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_32px] items-center gap-2 border-b border-zinc-100 px-2 py-1.5 last:border-0">
               <input className={inputCls + ' font-mono text-xs'} value={h.name} placeholder="Header-Name" onChange={(e) => onChange(headers.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
               <input className={inputCls + ' font-mono text-xs'} value={h.value} placeholder="value" onChange={(e) => onChange(headers.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))} />
               <button aria-label="删除行" className="rounded p-1 text-zinc-500 hover:bg-red-50 hover:text-red-600" onClick={() => onChange(headers.filter((_, j) => j !== i))}><Trash2 size={14} strokeWidth={1.75} /></button>
@@ -57,8 +57,8 @@ export function ChannelDrawer({ id, onClose }: { id: string | null; onClose: () 
       open
       onClose={onClose}
       title={`编辑渠道 · ${c.name}`}
-      sub={<span className="flex flex-wrap items-center gap-2">{site.name} / {acct?.name} · 当前 v{c.version} <ApplyBadge a={c.apply} cat={site.category} /></span>}
-      footer={<><span className="mr-auto text-xs text-zinc-500">{site.category === 'rp' ? '保存不触发请求，仅写入中心' : site.category === 'client' ? '保存后需重新生成客户端配置' : '保存后推送 New API'}</span><Btn onClick={onClose}>关闭</Btn><Btn kind="primary" onClick={save} disabled={c.apply === 'saving'}>{c.apply === 'saving' ? '保存中…' : '保存'}</Btn></>}
+      sub={<span className="flex flex-wrap items-center gap-2">{site.name} / {acct?.name} · 当前 v{c.version} <ApplyBadge a={c.apply} cat={c.category} /></span>}
+      footer={<><span className="mr-auto text-xs text-zinc-500">{c.category === 'rp' ? '保存不触发请求，仅写入中心' : c.category === 'client' ? '保存后需重新生成客户端配置' : '保存后推送 New API'}</span><Btn onClick={onClose}>关闭</Btn><Btn kind="primary" onClick={save} disabled={c.apply === 'saving'}>{c.apply === 'saving' ? '保存中…' : '保存'}</Btn></>}
     >
       {c.applyMsg && (
         <div className={`mb-4 rounded-md px-3 py-2 text-sm ${c.apply === 'failed' ? 'bg-red-50 text-red-800' : c.apply === 'synced' ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>{c.applyMsg}</div>
@@ -75,9 +75,9 @@ export function ChannelDrawer({ id, onClose }: { id: string | null; onClose: () 
         </div>
         <Field label="挑选的模型" hint="逗号分隔；只放实际要用的几个"><input className={inputCls + ' font-mono text-xs'} value={f.models.join(', ')} onChange={(e) => up({ models: e.target.value.split(',').map((x) => x.trim()).filter(Boolean) })} /></Field>
         <Field label={`凭据（当前 ${c.keyMask}）`} hint="仅演示，输入后只保存掩码"><input className={inputCls + ' font-mono text-xs'} value={key} placeholder="粘贴新 key 以替换" onChange={(e) => setKey(e.target.value)} /></Field>
-        <Field label="应用绑定" hint={site.category === 'rp' ? 'RP 资源独占酒馆' : site.category === 'client' ? '仅限指定客户端' : '通用资源可被 Code、Hermes Chat/Cron 复用'}>
+        <Field label="应用绑定" hint={c.category === 'rp' ? 'RP 资源独占酒馆' : c.category === 'client' ? '仅限指定客户端' : '通用资源可被 Code、Hermes Chat/Cron 复用'}>
           <div className="flex flex-wrap gap-3 pt-1">
-            {(site.category === 'rp' ? ['酒馆'] : site.category === 'client' ? [c.client || 'Claude Code'] : ['Code', 'Hermes Chat', 'Hermes Cron']).map((b) => (
+            {(c.category === 'rp' ? ['酒馆'] : c.category === 'client' ? [c.client || 'Claude Code'] : ['Code', 'Hermes Chat', 'Hermes Cron']).map((b) => (
               <label key={b} className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={f.bindings.includes(b)} onChange={(e) => up({ bindings: e.target.checked ? [...f.bindings, b] : f.bindings.filter((x) => x !== b) })} />{b}</label>
             ))}
           </div>
@@ -87,14 +87,14 @@ export function ChannelDrawer({ id, onClose }: { id: string | null; onClose: () 
             <select className={inputCls} value={f.enabled ? '1' : '0'} onChange={(e) => up({ enabled: e.target.value === '1' })}><option value="1">启用</option><option value="0">暂停</option></select>
           </Field>
           <Field label="管理方式">
-            <select className={inputCls} value={f.mode} disabled={site.category !== 'general' && site.category !== 'media'} onChange={(e) => up({ mode: e.target.value as Channel['mode'] })}><option value="auto">自动</option><option value="manual">人工</option></select>
+            <select className={inputCls} value={f.mode} disabled={c.category !== 'general' && c.category !== 'media'} onChange={(e) => up({ mode: e.target.value as Channel['mode'] })}><option value="auto">自动</option><option value="manual">人工</option></select>
           </Field>
           <Field label="人工评价">
             <select className={inputCls} value={f.rating} onChange={(e) => up({ rating: e.target.value as Channel['rating'] })}><option value="">未评</option><option>优</option><option>良</option><option>差</option></select>
           </Field>
         </div>
         <Field label="备注"><textarea className={inputCls + ' h-16 py-1.5'} value={f.note} onChange={(e) => up({ note: e.target.value })} /></Field>
-        {site.category === 'client' && <HeaderEditor headers={f.headers} onChange={(h) => up({ headers: h })} />}
+        {c.category === 'client' && <HeaderEditor headers={f.headers} onChange={(h) => up({ headers: h })} />}
       </div>
     </Drawer>
   )
@@ -136,11 +136,24 @@ export function ConflictDrawer({ id, onClose }: { id: string | null; onClose: ()
   )
 }
 
+const slug = (c: Channel) => c.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'demo'
+
 export function configText(c: Channel, client: string) {
   const key = 'sk-DEMO-NOT-A-REAL-KEY'
   const hdr = Object.fromEntries(c.headers.filter((h) => h.name).map((h) => [h.name, h.value]))
   if (client === 'Codex')
     return `# ~/.codex/config.toml  (演示)\nmodel = "${c.models[0]}"\nmodel_provider = "demo"\n\n[model_providers.demo]\nbase_url = "${c.baseUrl}"\nwire_api = "responses"\nenv_key = "DEMO_API_KEY"\nhttp_headers = ${JSON.stringify(hdr)}\n\n# export DEMO_API_KEY=${key}`
+  if (client === 'Magpie') {
+    // Magpie：anthropic / chat / responses 字段是对应协议的 URL 字符串
+    const proto: Record<string, string> = { Anthropic: 'anthropic', OpenAI: 'chat', 'OpenAI Responses': 'responses' }
+    return JSON.stringify({ providers: [{ name: slug(c), api_key: key, [proto[c.protocol] || 'chat']: c.baseUrl, models: c.models, headers: hdr }] }, null, 2)
+  }
+  if (client === 'Hermes Chat' || client === 'Hermes Cron') {
+    const provider = `${slug(c)}-${client === 'Hermes Chat' ? 'chat' : 'cron'}`
+    const transport: Record<string, string> = { Anthropic: 'anthropic_messages', OpenAI: 'chat_completions', 'OpenAI Responses': 'codex_responses', Gemini: 'chat_completions' }
+    const eh = Object.entries(hdr).map(([k, v]) => `      ${k}: "${v}"`).join('\n')
+    return `# Hermes ${client === 'Hermes Chat' ? 'Chat' : 'Cron'} config.yaml（演示）\nmodel:\n  default: "${c.models[0]}"\n  provider: "${provider}"\n\nproviders:\n  ${provider}:\n    base_url: "${c.baseUrl}"\n    api_key: "${key}"\n    transport: "${transport[c.protocol] || 'chat_completions'}"\n    extra_headers:${eh ? '\n' + eh : ' {}'}`
+  }
   if (client === 'OpenCode')
     return JSON.stringify({ provider: { demo: { options: { baseURL: c.baseUrl, apiKey: key, headers: hdr }, models: Object.fromEntries(c.models.map((m) => [m, {}])) } } }, null, 2)
   return JSON.stringify({ env: { ANTHROPIC_BASE_URL: c.baseUrl, ANTHROPIC_AUTH_TOKEN: key, ANTHROPIC_MODEL: c.models[0], ANTHROPIC_CUSTOM_HEADERS: Object.entries(hdr).map(([k, v]) => `${k}: ${v}`).join('\n') } }, null, 2)
@@ -154,9 +167,8 @@ export function ConfigDrawer({ id, client, title, note, onClose, onDone }: { id:
   return (
     <Drawer open onClose={onClose} title={title} sub={`${client} · ${c.protocol} · ${c.baseUrl}`} footer={<><Btn onClick={onClose}>关闭</Btn><Btn kind="primary" onClick={() => { navigator.clipboard?.writeText(text).catch(() => {}); toast('已复制配置（演示 key）'); onDone?.() }}><Copy size={14} />复制配置</Btn></>}>
       <div className="mb-3 flex flex-wrap gap-2"><Badge tone="info">key 为演示值 sk-DEMO-NOT-A-REAL-KEY</Badge>{note && <Badge tone="warn">{note}</Badge>}</div>
-      <pre className="overflow-x-auto whitespace-pre rounded-md bg-zinc-900 p-4 font-mono text-xs leading-relaxed text-zinc-100">{text}</pre>
+      <pre className="max-w-full overflow-x-auto whitespace-pre rounded-md bg-zinc-900 p-4 font-mono text-xs leading-relaxed text-zinc-100">{text}</pre>
       <p className="mt-3 text-xs text-zinc-500">中心不会启动客户端或发出请求。模型列表读取成功不代表调用可用，需真实任务成功后才标记「已验证」。</p>
     </Drawer>
   )
 }
-

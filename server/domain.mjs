@@ -18,6 +18,7 @@ export const channelPatch = z
     name: z.string().min(1).optional(),
     siteId: z.string().optional(),
     accountId: z.string().optional(),
+    authType: z.enum(["bearer", "api_key"]).optional(),
     category: z.enum(["general", "media", "rp", "client"]).optional(),
     baseUrl: url.optional(),
     protocol: z
@@ -44,6 +45,12 @@ export function normalizeUrl(value) {
   u.hash = "";
   u.search = "";
   u.pathname = u.pathname.replace(/\/+$/, "");
+  return u.href.replace(/\/$/, "");
+}
+export function canonicalApi(value, protocol = "OpenAI") {
+  const u = new URL(normalizeUrl(value));
+  if (["OpenAI", "OpenAI Responses"].includes(protocol))
+    u.pathname = u.pathname.replace(/\/v1$/, "");
   return u.href.replace(/\/$/, "");
 }
 export function headers(input) {
@@ -79,12 +86,52 @@ export function dayKey(time, tz = "Asia/Shanghai") {
     day: "2-digit",
   }).format(new Date(time));
 }
+export function nextReset(time, tz, resetAt) {
+  const now = new Date(time),
+    [hour, minute] = resetAt.split(":").map(Number);
+  const partsAt = (d) =>
+    Object.fromEntries(
+      new Intl.DateTimeFormat("en-CA", {
+        timeZone: tz,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hourCycle: "h23",
+      })
+        .formatToParts(d)
+        .filter((x) => x.type !== "literal")
+        .map((x) => [x.type, Number(x.value)]),
+    );
+  const serial = (p) =>
+    Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+  const current = partsAt(now),
+    offset = serial(current) - Math.floor(now.getTime() / 1000) * 1000;
+  let target = Date.UTC(
+    current.year,
+    current.month - 1,
+    current.day,
+    hour,
+    minute,
+  );
+  if (hour * 60 + minute <= current.hour * 60 + current.minute)
+    target += 86400000;
+  let end = target - offset;
+  end += target - serial(partsAt(new Date(end)));
+  if (serial(partsAt(new Date(end))) !== target)
+    throw new Error("该重置时刻在所选时区不存在，请填写明确截止时间");
+  return new Date(end).toISOString();
+}
 export function availability(c, a, now = new Date()) {
   if (!c.enabled) return "人工暂停";
   if (!c.credentialId && !c.gateway && !c.nativeCredentialRef) return "缺 key";
   if (c.availability && c.availability !== "可用") return c.availability;
+  if (c.callIssue) return c.callIssue.reason;
   if (a?.status && a.status !== "正常") return a.status;
-  if (a?.balance === 0) return "余额耗尽";
+  if (a?.balance !== null && a?.balance !== undefined && a.balance <= 0)
+    return "余额耗尽";
   if (a?.validUntil && new Date(a.validUntil) <= now) return "额度已到期";
   const windows = a?.benefit?.windows;
   if (windows?.length) {
@@ -153,8 +200,14 @@ export function evaluate(channels, accounts, calls, rules, now = new Date()) {
       success = samples
         ? (100 * rows.filter((x) => x.result === "success").length) / samples
         : null;
-    let priority = c.priority,
-      weight = c.weight || 100,
+    let priority =
+        c.mode === "auto"
+          ? (c.baseRouting?.priority ?? c.priority)
+          : c.priority,
+      weight =
+        (c.mode === "auto" ? c.baseRouting?.weight : undefined) ??
+        c.weight ??
+        100,
       reason = "样本不足，保留原配置";
     const hold = availability(c, a, now),
       tier =

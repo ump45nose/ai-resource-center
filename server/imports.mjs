@@ -9,6 +9,8 @@ export const rowSchema = z
       name: z.string(),
       url: z.url(),
       checkinUrl: z.url().optional(),
+      issue: z.string().optional(),
+      siteDown: z.boolean().optional(),
     }),
     name: z.string(),
     baseUrl: z.url(),
@@ -18,10 +20,17 @@ export const rowSchema = z
       .optional(),
     models: z.array(z.string()),
     key: z.string().optional(),
+    credentialFingerprint: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
     client: z.string().optional(),
     bindings: z.array(z.string()).optional(),
     note: z.string().optional(),
     observedAt: z.string().optional(),
+    ruleText: z.string().optional(),
+    historicalResult: z.string().optional(),
+    checkinSupported: z.boolean().nullable().optional(),
     availability: z.string().optional(),
     gateway: z
       .object({
@@ -87,6 +96,9 @@ export async function parseFile(file) {
         site: {
           name: new URL(url).host,
           url,
+          ...(sheet.name === "网站打不开"
+            ? { issue: "网站打不开", siteDown: true }
+            : {}),
           ...(get(/签到.*(地址|入口)/, 5).startsWith("http")
             ? { checkinUrl: get(/签到.*(地址|入口)/, 5) }
             : {}),
@@ -98,11 +110,16 @@ export async function parseFile(file) {
         ...(get(/^(补充\s*key|key|API.?key|密钥)$/i, 7)
           ? { key: get(/^(补充\s*key|key|API.?key|密钥)$/i, 7) }
           : {}),
-        note: [get(/(限制|规则|说明)/, 6), get(/(状态|结果)/, 4)]
-          .filter(Boolean)
-          .join("\n"),
+        ruleText: get(/(限制|规则|说明)/, 6),
+        historicalResult: get(/(状态|结果)/, 4),
+        note: get(/(限制|规则|说明)/, 6),
+        ...(sheet.name.includes("无签到") || sheet.name.includes("无法签到")
+          ? { checkinSupported: false }
+          : {}),
         enabled: !!categories[sheet.name],
-        ...(categories[sheet.name] ? {} : { availability: sheet.name }),
+        ...(categories[sheet.name] || sheet.name === "网站打不开"
+          ? {}
+          : { availability: sheet.name }),
         ...(sheet.name === "Code"
           ? { client: "Claude Code", protocol: "Anthropic" }
           : { protocol: "OpenAI" }),
