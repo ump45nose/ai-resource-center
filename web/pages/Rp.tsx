@@ -15,6 +15,7 @@ import { Badge, Btn, Section, ApplyBadge, inputCls, Url } from "../ui";
 import { ChannelDrawer, ConflictDrawer } from "../shared";
 import type { Channel } from "../data";
 import { NewConnection } from "../NewConnection";
+import { resourceGroup } from "../resourceGroups";
 function RpNote({
   channel,
   save,
@@ -47,7 +48,14 @@ export default function RpView() {
     [conf, setConf] = useState<string | null>(null),
     [drag, setDrag] = useState<string | null>(null);
   const list = s.channels
-    .filter((c) => c.category === "rp")
+    .filter(
+      (c) =>
+        c.category === "rp" &&
+        !resourceGroup(
+          c,
+          s.sites.find((site) => site.id === c.siteId)!,
+        ),
+    )
     .sort((a, b) => a.order - b.order);
   const lastSave = s.received.sillyTavern || "尚未收到酒馆保存回执";
   const reorder = (ids: string[]) => void act("/channels/reorder", { ids });

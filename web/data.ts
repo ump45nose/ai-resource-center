@@ -22,6 +22,7 @@ export interface Channel {
   category: Category;
   gateway?: { sourceId: string; channelId?: number };
   availability?: string;
+  listGroup?: "exhausted" | "invalid" | "maintenance" | "removed";
   weight: number;
   hasKey: boolean;
   tavern?: {

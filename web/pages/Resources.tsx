@@ -19,6 +19,12 @@ import { catLabel, type Site, type Channel } from "../data";
 import RpView from "./Rp";
 import ClientView from "./Client";
 import { NewConnection } from "../NewConnection";
+import {
+  exceptionGroups,
+  exceptionSites,
+  resourceGroup,
+} from "../resourceGroups";
+import Exceptions from "./Exceptions";
 
 const tabs = [
   ["all", "全部"],
@@ -49,12 +55,15 @@ export default function Resources() {
   const [conf, setConf] = useState<string | null>(null);
   const q = query.trim().toLowerCase();
   const chansOf = (id: string) => s.channels.filter((c) => c.siteId === id);
+  const exception = exceptionGroups.find((g) => g.id === sub);
+  const inCategory = (site: Site, category: string) =>
+    chansOf(site.id).some(
+      (c) => c.category === category && !resourceGroup(c, site),
+    );
   const sites = s.sites.filter((x) => {
     const cs = chansOf(x.id);
     if (
-      sub === "issue"
-        ? !isIssue(x, cs)
-        : sub !== "all" && !x.categories?.includes(sub as any)
+      sub === "issue" ? !isIssue(x, cs) : sub !== "all" && !inCategory(x, sub)
     )
       return false;
     if (proto && !cs.some((c) => c.protocol === proto)) return false;
@@ -91,7 +100,7 @@ export default function Resources() {
                 ? s.sites.length
                 : k === "issue"
                   ? s.sites.filter((x) => isIssue(x, chansOf(x.id))).length
-                  : s.sites.filter((x) => x.categories?.includes(k)).length;
+                  : s.sites.filter((x) => inCategory(x, k)).length;
             return (
               <button
                 key={k}
@@ -104,7 +113,24 @@ export default function Resources() {
           })}
         </div>
       </div>
-      {sub === "rp" ? (
+      <div className="mb-5 flex flex-wrap items-center gap-2">
+        <span className="mr-1 text-xs text-zinc-500">异常清单</span>
+        {exceptionGroups.map((g) => (
+          <button
+            key={g.id}
+            onClick={() => go("resources", g.id)}
+            className={`rounded-md border px-3 py-1.5 text-sm ${sub === g.id ? "border-blue-200 bg-blue-50 font-medium text-blue-700" : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50"}`}
+          >
+            {g.label}{" "}
+            <span className="ml-1 tabular-nums">
+              {exceptionSites(s.sites, s.channels, g.id).length}
+            </span>
+          </button>
+        ))}
+      </div>
+      {exception ? (
+        <Exceptions group={exception.id} label={exception.label} />
+      ) : sub === "rp" ? (
         <RpView />
       ) : sub === "client" ? (
         <ClientView />

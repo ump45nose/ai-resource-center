@@ -42,6 +42,12 @@ const defaults = {
   reason: "尚未采集",
   apply: "pending",
 };
+const listGroups = {
+  "归档-无余额无签到": "exhausted",
+  "归档-网站或key失效": "invalid",
+  "暂停维护(模型不足或者服务维护)": "maintenance",
+  已移除: "removed",
+};
 export const eventSchema = z
   .object({
     eventId: z.string().min(1),
@@ -218,6 +224,7 @@ export class Center {
     const { credentialId, applied, ...out } = c;
     return {
       ...out,
+      listGroup: listGroups[c.availability],
       availability:
         availability(
           { ...c, enabled: true },
