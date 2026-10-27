@@ -22,7 +22,6 @@ export default function Sources() {
     refresh,
     notify,
     operations,
-    meta,
   } = useWorkspace();
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");

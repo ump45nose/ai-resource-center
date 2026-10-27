@@ -23,27 +23,16 @@ import {
   RefreshCw,
   Search,
   Settings2,
-  Shield,
   Sparkles,
   X,
 } from "lucide-react";
 import { Badge, Button, Overlay } from "./components";
 import { api, allPages, ApiError } from "./api";
 import {
-  allModels,
   activeModels,
-  amount,
   balances,
-  channelStatus,
   dateTime,
   pageLabels,
-  tagLabels,
-  websiteLabel,
-  catalogLabel,
-  type Channel,
-  type ChannelTag,
-  type ChannelUsage,
-  usageLabels,
   type Meta,
   type Model,
   type Operation,

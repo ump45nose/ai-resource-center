@@ -4,7 +4,7 @@ import {
   reviewManaged,
 } from "./maintenance-policy.mjs";
 import { policies, maintenanceStatus } from "./maintenance-policy.mjs";
-import { gatewayBlock, taskBlock, usageOf, tagsOf } from "./channel-rules.mjs";
+import { gatewayBlock, taskBlock, tagsOf } from "./channel-rules.mjs";
 import { dayKey } from "./domain.mjs";
 
 export class Maintenance {

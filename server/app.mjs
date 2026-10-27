@@ -6,7 +6,7 @@ import { registerWeb } from "./web.mjs";
 import cookie from "@fastify/cookie";
 import { z } from "zod";
 import { Store, hash } from "./store.mjs";
-import { Resources, paginate } from "./resources.mjs";
+import { Resources } from "./resources.mjs";
 import { Sources } from "./sources.mjs";
 import { Scans } from "./scans.mjs";
 import { Operations } from "./operations.mjs";
@@ -24,7 +24,7 @@ import {
   sourceIdentity,
 } from "./auth.mjs";
 import { Problem, publicValue, errorMessage } from "./errors.mjs";
-import { ingestAccounts, recordCall } from "./ingest.mjs";
+import { ingestAccounts } from "./ingest.mjs";
 import { ingestHubInventory, ingestHubCredentials } from "./hub-ingest.mjs";
 import { mcpRequest } from "./mcp.mjs";
 import { registerLegacy } from "./legacy.mjs";

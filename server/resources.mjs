@@ -15,7 +15,6 @@ import {
   tagsOf,
   capabilitiesOf,
   applicationsOf,
-  isRp,
   isInternal,
   validateTags,
   probeBlock,

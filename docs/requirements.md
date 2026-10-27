@@ -192,4 +192,3 @@ Hub 与酒馆实现可按第一阶段契约并行，不必等待整个后端完�
 
 - [HTTP／MCP 能力契约](api-mcp-contract.md)：供后端、Hub 和 Agent 接入实现。
 - [外部对接说明](integration-handoff.md)：Hub、酒馆、cron、All API Hub、网关及统计的分工和完成条件。
-- [现有数据说明](data-contract.md)与[可复用逻辑](reuse-map.md)：迁移和抽取依据。
