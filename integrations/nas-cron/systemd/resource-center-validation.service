@@ -1,0 +1,9 @@
+[Unit]
+Description=Resource center preview validation and receipt retry
+After=network-online.target
+[Service]
+Type=oneshot
+User=yuwk
+UMask=0077
+TimeoutStartSec=8min
+ExecStart=/home/hermes/.hermes/hermes-agent/venv/bin/python /home/yuwk/cron/resource-center/resource-center-cron.py --config /home/yuwk/cron/env/resource-center.json --work

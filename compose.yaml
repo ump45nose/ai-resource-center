@@ -1,0 +1,39 @@
+name: app
+
+services:
+  ai-resource-center-server:
+    build: .
+    image: ai-resource-center:server-v2
+    container_name: ai-resource-center-server
+    restart: unless-stopped
+    ports:
+      - "192.168.31.201:18323:18323"
+    volumes:
+      - /vol2/1000/Docker/ai-resource-center-v2/data:/data
+    environment:
+      DATA_DIR: /data
+      HOST: 0.0.0.0
+      PORT: "18323"
+      WORKER: "true"
+      GATEWAY_WRITES: "true"
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+  browser-image-bridge:
+    image: ai-resource-center:server-v2
+    container_name: browser-image-bridge
+    command: ["node", "integrations/browser-images/bridge.mjs"]
+    restart: unless-stopped
+    ports:
+      - "192.168.31.201:18324:18324"
+    volumes:
+      - /vol2/1000/Docker/ai-resource-center-v2/data/browser-images:/data/browser-images
+    environment:
+      IMAGE_BRIDGE_DATA: /data/browser-images
+      HOST: 0.0.0.0
+      PORT: "18324"
+    logging:
+      options:
+        max-size: "5m"
+        max-file: "2"
