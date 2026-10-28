@@ -1,3 +1,4 @@
+import { reconcileCheckinBalances } from "./account-state.mjs";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { dayKey, nextReset } from "./domain.mjs";
@@ -124,6 +125,7 @@ export function ingestAccounts(resources, source, events) {
     store.setting(`received:${source}`, new Date().toISOString());
     return { acknowledgedIds };
   });
+  balances.push(...reconcileCheckinBalances(store, balances));
   resources.reconcileAccountState(balances);
   return result;
 }

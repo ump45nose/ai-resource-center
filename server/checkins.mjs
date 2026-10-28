@@ -85,7 +85,11 @@ export function checkinRows(store, range, siteId) {
     const account = links?.length === 1 ? links[0] : executor;
     if (!account || links?.length > 1 || !sites.has(account.siteId)) { unresolved++; continue; }
     if (siteId && account.siteId !== siteId) continue;
-    const event = JSON.parse(row.data), key = `${row.business_date}:${account.id}`;
+    const event = JSON.parse(row.data);
+    // The API account's disabled built-in check-in is not the separate worker's result.
+    if (account.checkinAccountId && executor.id === account.id &&
+        event.reason === "auto_checkin_disabled") continue;
+    const key = `${row.business_date}:${account.id}`;
     let group = groups.get(key);
     if (!group) {
       group = {
@@ -95,6 +99,7 @@ export function checkinRows(store, range, siteId) {
         timezone: event.timezone || ZONE, occurredAt: row.occurred_at,
         latestResult: event.result || "待确认", reason: event.reason || null,
         method: event.method || null, confirmed: false, confirmedAt: null,
+        applicable: !["account_disabled", "auto_checkin_disabled", "no_provider", "no_selected_method"].includes(event.reason),
         rewardText: null, reward: null,
       };
       groups.set(key, group);
@@ -129,7 +134,7 @@ export function dailyResources(resources, now = new Date()) {
   const accounts = data.accounts.filter((a) => !a.mergedInto && a.role !== "checkin" && sites.has(a.siteId));
   const expected = accounts.filter((a) => a.enabled !== false && automaticCheckin(store, a));
   const enabled = new Set(accounts.filter((a) => a.enabled !== false).map((a) => a.id));
-  const today = rows.filter((r) => enabled.has(r.accountId));
+  const today = rows.filter((r) => enabled.has(r.accountId) && (r.applicable || r.confirmed));
   const observed = new Set(today.map((r) => r.accountId));
   const channels = data.channels.filter((c) => !isRemoved(c) && !isInternal(c) && !c.mergedInto && sites.has(c.siteId));
   const channelIds = new Set(channels.map((c) => c.id));

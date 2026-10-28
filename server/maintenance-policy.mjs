@@ -111,6 +111,8 @@ export function entitlement(account, now = new Date()) {
       !!account.validUntil,
     dailyBalance: dailyExpired ? 0 : dailyBalance ?? null,
     longBalance: longBalance ?? null,
+    dailyLimit: benefit.dailyLimit ?? null,
+    renewal: benefit.renewal || null,
     releaseTimes: benefit.releaseTimes || benefit.drops || null,
     windows: benefit.windows || [],
   };

@@ -60,7 +60,7 @@ function rebind(store, kind, from, to) {
   }
 }
 
-function mergeAccount(store, from, to) {
+export function mergeAccount(store, from, to) {
   if (from === to) return;
   const old = store.require("account", from),
     keep = store.require("account", to);

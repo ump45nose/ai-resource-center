@@ -27,6 +27,7 @@ const account = z
     unit: z.string(),
     enabled: z.boolean(),
     siteType: z.string(),
+    health: z.object({ status: z.string(), reason: z.string().optional(), code: z.string().optional() }).strict().optional(),
     checkin: z
       .object({
         enabled: z.boolean(),
@@ -178,6 +179,7 @@ export function ingestHubInventory(resources, source, raw) {
               checkinUrl: row.site?.checkinUrl || null,
               siteType: row.siteType,
               enabled: row.enabled,
+              ...(row.health ? {health: row.health} : {}),
               checkin: row.checkin,
               observedAt: p.occurredAt,
               deviceId: p.deviceId,

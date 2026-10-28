@@ -43,6 +43,8 @@ export function linkCheckinAccounts(store) {
     linked = [];
   for (const executor of accounts.filter(
     (a) =>
+      a.enabled !== false && a.checkinEnabled !== false &&
+      a.sourceObservation?.enabled !== false &&
       a.sourceObservation?.source === "all-api-hub" &&
       a.sourceObservation.present !== false &&
       (/^(personal-checkin|image-reward)-/.test(
@@ -139,4 +141,27 @@ export function archiveDepletedAccounts(store, accountIds) {
     }
   }
   return archived;
+}
+
+// Only an explicit native balance from the same account site may flow to its beneficiary.
+// A welfare-site balance is not the API account's balance.
+export function reconcileCheckinBalances(store, observedAccountIds) {
+  const changed = [];
+  for (const account of store.list("account")) {
+    if (account.mergedInto || !observedAccountIds.includes(account.checkinAccountId)) continue;
+    const executor = store.get("account", account.checkinAccountId);
+    if (!executor || executor.balance == null || !["积分", "点", "白晶", "张（当日）"].includes(executor.unit)) continue;
+    const sourceSite = store.get("site", executor.siteId), targetSite = store.get("site", account.siteId);
+    if (!sourceSite || !targetSite || new URL(sourceSite.url).hostname !== new URL(targetSite.url).hostname) continue;
+    if (!Number.isFinite(Date.parse(executor.confirmedAt)) ||
+        Date.parse(account.confirmedAt) >= Date.parse(executor.confirmedAt)) continue;
+    store.update("account", account.id, account.version, {
+      balance: executor.balance, unit: executor.unit, confirmedAt: executor.confirmedAt,
+      ...(executor.dailyBalance != null ? {dailyBalance: executor.dailyBalance} : {}),
+      ...(executor.longBalance != null ? {longBalance: executor.longBalance} : {}),
+      balanceSourceAccountId: executor.id,
+    });
+    changed.push(account.id);
+  }
+  return changed;
 }
