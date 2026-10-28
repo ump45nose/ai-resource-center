@@ -11,6 +11,8 @@ import { z } from "zod";
 import { headers as normalizeHeaders } from "./domain.mjs";
 import { Problem, publicValue } from "./errors.mjs";
 import { paginate, policies } from "./resources.mjs";
+import { listCheckins } from "./checkins.mjs";
+import { rpEditSchema } from "./rp-sync.mjs";
 
 const text = z.string().min(1),
   url = z
@@ -174,6 +176,7 @@ export function capabilities({
   evaluations,
   maintenance,
   distribution,
+  rp,
 }) {
   const all = [];
   const add = (
@@ -196,6 +199,10 @@ export function capabilities({
       write,
       ...options,
     });
+  add("list_rp_connections", "GET", "/rp/connections", "酒馆连接与同步状态", {channelId: text.optional()},
+    (a,auth) => { const result=rp.list(auth); return {...result,items:result.items.filter(b=>!a.channelId||b.channelId===a.channelId)}; });
+  add("update_rp_connection", "PATCH", "/rp/connections/:id", "修改酒馆连接，独立保存选定模型", {id:text,...rpEditSchema.shape},
+    (a,auth)=>rp.edit(auth,a.id,a),true);
   add(
     "capabilities",
     "GET",
@@ -232,6 +239,13 @@ export function capabilities({
     "今日资源、权益、签到和待处理事项",
     {},
     () => resources.overview(),
+  );
+  add(
+    "list_checkins", "GET", "/checkins",
+    "按业务日期和受益账号归并签到记录，保留最新尝试和已确认成果",
+    { cursor: listing.cursor, limit: listing.limit, siteId: text.optional(),
+      start_date: z.string().optional(), end_date: z.string().optional() },
+    (query) => listCheckins(store, query),
   );
   add(
     "list_sites",

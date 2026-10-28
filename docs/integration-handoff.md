@@ -47,6 +47,13 @@ Hub 原有登录保持不变，具体模块布局、原生或其他渲染方式�
 
 ## 给酒馆 agent：双向同步连接，不改生成内容配置
 
+独立联动插件使用 `/api/v2/rp/inventory`、`saves`、`credentials` 上报，
+`/api/v2/rp/connections` 查询／修改绑定，`/api/v2/ingest/rp-calls` 回传终态。
+配置下发与回执复用 `connector/jobs`、`connector/receipts`，不另建变化队列。
+`/api/v2/access` 为 `rp` 与 `connector` 分别绑定同一 `sourceId/rpInstanceId/rpUserId`，
+其中 `rpRegistration=true` 仅允许登记该实例用户的连接；旧版按渠道授权仍兼容。
+RP 绑定与渠道独立比较版本，选定模型不写入共享模型目录。归档使用中心六类原因。
+
 ### 双方各负责什么
 
 服务方负责稳定连接 ID、版本、变化记录、受限凭据存取、冲突结果和调用入库。酒馆方负责原生保存流程、原生连接 ID 映射、本地待发队列、接收变更、应用回执和被动调用采集。

@@ -128,7 +128,7 @@ HTTP 接受后返回 `202` 和 `{ "operationId": "example-operation", "state": "
 | 查询 RP 连接 | `GET /rp/connections` | `resource_list_rp_connections`；返回酒馆应用绑定及关联渠道，过滤实例，读取不访问上游 |
 | 保存 RP 连接 | `PATCH /rp/connections/{id}` | `resource_update_rp_connection`；更新对应酒馆绑定，所选模型不覆盖共享目录；共享字段按渠道版本更新 |
 | 上报酒馆已保存连接 | `POST /rp/saves` | 酒馆保存适配器；本地版本、中心基线版本和来源事件标识 |
-| 取得／确认酒馆配置变更 | `GET /rp/changes`、`POST /rp/receipts` | 酒馆同步适配器；游标增量，确认原生保存结果 |
+| 取得／确认酒馆配置变更 | `GET /connector/jobs`、`POST /connector/receipts` | 配对酒馆实例及用户；租约任务，确认原生保存回读结果 |
 | 接收真实 RP 调用 | `POST /ingest/rp-calls` | 酒馆被动采集适配器 |
 | 接收账号、签到及网关观察 | `POST /ingest/events` | 已登记来源适配器；按来源与事件标识去重 |
 

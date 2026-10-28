@@ -28,6 +28,7 @@ import { ingestAccounts } from "./ingest.mjs";
 import { ingestHubInventory, ingestHubCredentials } from "./hub-ingest.mjs";
 import { mcpRequest } from "./mcp.mjs";
 import { registerLegacy } from "./legacy.mjs";
+import { RpSync, registerRp } from "./rp-sync.mjs";
 import {
   taskCatalogSchema,
   prepareSchema,
@@ -36,6 +37,7 @@ import {
   outputs,
   transportRoutes,
   connectorReceiptSchema,
+  accessSchema,
 } from "./transport-schemas.mjs";
 
 const jsonSchema = (s) =>
@@ -217,6 +219,7 @@ export async function createApp({
   sources.onInventory = (id, channels, startedAt) =>
     distribution.observeNewApi(id, channels, startedAt);
   const context = {
+    rp: new RpSync(store, resources),
     distribution,
     store,
     resources,
@@ -330,7 +333,7 @@ export async function createApp({
       method: cap.method,
       url: `/api/v2${cap.path}`,
       handler: async (req, reply) => {
-        authorize(req.auth, cap.write);
+        if (!(cap.name === "resource_list_rp_connections" && ["rp", "connector"].includes(req.auth.role))) authorize(req.auth, cap.write);
         const input = cap.schema.parse({
           ...req.query,
           ...req.body,
@@ -353,16 +356,7 @@ export async function createApp({
   app.post("/api/v2/access", (req) => {
     if (req.auth.role !== "admin")
       throw new Problem(403, "只有管理员可创建接入凭据");
-    const input = z
-      .object({
-        role: z.enum(["read", "manage", "ingest", "cron", "rp", "connector"]),
-        sourceId: z.string().optional(),
-        channelIds: z.array(z.string()).optional(),
-        target: z
-          .enum(["all-api-hub", "chrome-bookmarks", "sillytavern"])
-          .optional(),
-      })
-      .parse(req.body);
+    const input = accessSchema.parse(req.body);
     if (
       ["ingest", "cron", "rp", "connector"].includes(input.role) &&
       !input.sourceId
@@ -371,7 +365,7 @@ export async function createApp({
     if (
       (input.role === "rp" ||
         (input.role === "connector" && input.target === "sillytavern")) &&
-      !input.channelIds?.length
+      !input.channelIds?.length && !(input.rpInstanceId && input.rpUserId)
     )
       throw new Problem(400, "酒馆凭据必须绑定具体 RP 连接");
     if (input.role === "connector" && !input.target)
@@ -381,15 +375,18 @@ export async function createApp({
         target: input.target,
         sourceId: input.sourceId,
         channelIds: input.channelIds || [],
+        rpInstanceId: input.rpInstanceId,
+        rpUserId: input.rpUserId,
+        rpRegistration: input.role === "rp" && input.rpRegistration === true,
       }),
     };
   });
   app.get("/api/v2/connector/jobs", (req, reply) => {
     reply.header("Cache-Control", "no-store");
-    return distribution.claim(req.auth);
+    return req.auth.scope?.rpInstanceId ? context.rp.claim(req.auth) : distribution.claim(req.auth);
   });
   app.post("/api/v2/connector/receipts", (req) =>
-    distribution.acknowledge(req.auth, connectorReceiptSchema.parse(req.body)),
+    req.auth.scope?.rpInstanceId ? context.rp.receipt(req.auth, connectorReceiptSchema.parse(req.body)) : distribution.acknowledge(req.auth, connectorReceiptSchema.parse(req.body)),
   );
   app.post("/mcp", async (req, reply) => {
     const response = await mcpRequest(
@@ -477,6 +474,7 @@ export async function createApp({
     ),
   );
   registerLegacy(app, context);
+  registerRp(app, context.rp);
   operations.recover();
   const timer = worker
     ? setInterval(() => {

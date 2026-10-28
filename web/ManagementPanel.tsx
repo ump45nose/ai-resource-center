@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { ArrowUpRight, ChevronDown, ChevronRight } from "lucide-react";
 import { api } from "./api";
+import RpConnections from "./RpConnections";
 import { Badge, Button, Overlay } from "./components";
 import {
   archiveLabels,
@@ -1030,6 +1031,7 @@ function ChannelEditor({
         </p>
       )}
       <SyncStatus subject={c.id} />
+      <RpConnections channelId={c.id} />
       <div className="management-footnote">
         {c.recovery.waitingFor || c.recovery.reason || "未归档"}
         {c.recovery.nextCheckAt &&

@@ -96,6 +96,7 @@ export function entitlement(account, now = new Date()) {
     reasons.push("窗口关闭");
   return {
     available: !reasons.length,
+    availability: !balanceCurrent ? "unknown" : reasons.length ? "unavailable" : "available",
     reasons,
     timezone,
     balance: account?.balance ?? null,

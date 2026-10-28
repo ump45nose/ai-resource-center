@@ -7,9 +7,11 @@ export { defaults, policies, entitlement } from "./maintenance-policy.mjs";
 import { randomUUID } from "node:crypto";
 import { Problem, publicValue } from "./errors.mjs";
 import { normalizeUrl, canonicalApi, dayKey } from "./domain.mjs";
+import { dailyResources } from "./checkins.mjs";
 import {
   linkCheckinAccounts,
   archiveDepletedAccounts,
+  automaticCheckin,
 } from "./account-state.mjs";
 import {
   tagsOf,
@@ -543,6 +545,7 @@ export class Resources {
           }));
         return {
           ...publicValue(a),
+          automaticCheckin: a.enabled !== false && automaticCheckin(this.store, a),
           integration: this.distribution?.hubEligibility(a),
           entitlement: entitlement(a),
           checkins,
@@ -791,6 +794,7 @@ export class Resources {
         .filter((r) => JSON.parse(r.data).kind === "checkin")
         .map((r) => ({ accountId: r.account_id, ...JSON.parse(r.data) })),
       attention: this.attention(),
+      daily: dailyResources(this),
     };
   }
   previewChanges(input) {

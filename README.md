@@ -59,6 +59,23 @@ docker compose up -d --no-deps ai-resource-center-server
 
 ## 接口与集成
 
+Personal Hub 的只读接入复用 `read` 凭据和已有概览、站点、来源、待处理事项接口。
+`GET /api/v2/overview` 新增 `daily`：今日按受益账号去重的签到摘要、独立账号权益、
+登记渠道／目录可读渠道／已有任务验证通过的渠道模型组合数量，以及观察时间和覆盖说明。
+原概览字段保持兼容。权益的新增 `availability` 为 `available/unavailable/unknown`；
+旧余额失去时效时为 unknown，原 `available` 字段保留。
+签到摘要的 `expected` 是自动签到配置与当日实际观察账号的并集，
+`automaticExpected` 单列自动签到账号数；当日人工签到也计入成果，汇总分母保持一致。
+
+`GET /api/v2/checkins`（MCP `resource_list_checkins`）接受
+`start_date,end_date,siteId,cursor,limit`，默认最近 30 个业务日、Asia/Taipei，
+分页默认 50、最大 200。返回 `items,nextCursor,coverage`。同账号、同业务日仅一行；
+已关联签到账号归到唯一受益账号，保留 `executorAccountId`。
+`latestResult` 是最近尝试，`confirmed/confirmedAt` 保留当日已有成功事实，
+`rewardText` 保留已确认记录的原文，未知数值 `reward=null`，不推算收益。
+游标绑定查询及记录快照，变化时返回 `409 cursor_expired`，需从首页重读。
+覆盖范围只表示已接收记录，缺失日期不填零；读取不触发签到、同步或模型调用。
+
 | 入口 | 用途 |
 | --- | --- |
 | `GET /api/health` | 版本、执行器与网关写入状态 |
