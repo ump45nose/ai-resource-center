@@ -27,7 +27,14 @@ const account = z
     unit: z.string(),
     enabled: z.boolean(),
     siteType: z.string(),
-    health: z.object({ status: z.string(), reason: z.string().optional(), code: z.string().optional() }).strict().optional(),
+    health: z
+      .object({
+        status: z.string(),
+        reason: z.string().optional(),
+        code: z.string().optional(),
+      })
+      .strict()
+      .optional(),
     checkin: z
       .object({
         enabled: z.boolean(),
@@ -121,6 +128,43 @@ export function hubSyncState(store, source) {
   };
 }
 
+// Only newly discovered API accounts can request native key provisioning.
+// Curated sites and bookmark onboarding keep their existing owners and rules.
+function newHubAccount(store, account, source) {
+  const site = store.get("site", account.siteId);
+  return !!(
+    site &&
+    !site.removed &&
+    !site.mergedInto &&
+    !site.resourceExcluded &&
+    !site.curation &&
+    site.sources?.every((s) => s === source) &&
+    !account.mergedInto &&
+    account.enabled !== false &&
+    account.sourceObservation?.source === source &&
+    account.sourceObservation.present !== false &&
+    account.sourceObservation.enabled !== false &&
+    !["browser-recipe", "credential-profile"].includes(
+      account.sourceObservation.siteType,
+    ) &&
+    !store.list("channel").some((c) => c.siteId === site.id && !c.mergedInto) &&
+    !store
+      .list("bookmark-import")
+      .some((j) => j.origin === new URL(site.url).origin)
+  );
+}
+function provisioningAccounts(resources, source) {
+  if (!resources.distribution?.config("newapi").enabled) return [];
+  return resources.store
+    .list("account")
+    .filter(
+      (a) =>
+        newHubAccount(resources.store, a, source) &&
+        !(a.hubKeys || []).some((k) => k.present !== false),
+    )
+    .map((a) => a.sourceObservation.externalId);
+}
+
 export function ingestHubInventory(resources, source, raw) {
   const p = hubInventorySchema.parse(raw),
     store = resources.store;
@@ -179,7 +223,7 @@ export function ingestHubInventory(resources, source, raw) {
               checkinUrl: row.site?.checkinUrl || null,
               siteType: row.siteType,
               enabled: row.enabled,
-              ...(row.health ? {health: row.health} : {}),
+              ...(row.health ? { health: row.health } : {}),
               checkin: row.checkin,
               observedAt: p.occurredAt,
               deviceId: p.deviceId,
@@ -223,7 +267,10 @@ export function ingestHubInventory(resources, source, raw) {
     };
   });
   resources.reconcileAccountState(balances);
-  return result;
+  return {
+    ...result,
+    keyProvisioningAccountIds: provisioningAccounts(resources, source),
+  };
 }
 
 export function ingestHubCredentials(resources, source, raw) {
@@ -321,9 +368,7 @@ export function ingestHubCredentials(resources, source, raw) {
         !c &&
         credentialId &&
         p.credentials.length === 1 &&
-        !store.require("site", account.siteId).removed &&
-        !store.require("site", account.siteId).curation &&
-        !store.require("site", account.siteId).resourceExcluded
+        newHubAccount(store, account, source)
       )
         c = resources.channel({
           siteId: account.siteId,
@@ -333,6 +378,10 @@ export function ingestHubCredentials(resources, source, raw) {
           protocol: row.protocol,
           source,
           enabled: false,
+          credentialId,
+          credentialHeadersId,
+          credentialState: "present",
+          onboarding: { source, target: "newapi", createdAt: p.occurredAt },
         });
       const fact = {
         id: previousKey?.id || randomUUID(),
@@ -357,7 +406,8 @@ export function ingestHubCredentials(resources, source, raw) {
       if (c) {
         const previous = c.credentialId && store.reveal(c.credentialId);
         const selected =
-          !c.curation &&
+          (!c.curation ||
+            (c.onboarding?.source === source && !c.curation?.updatedAt)) &&
           c.source === source &&
           !!row.key &&
           (row.key === previous ||
@@ -456,5 +506,9 @@ export function ingestHubCredentials(resources, source, raw) {
     return { eventId: p.eventId, acceptedIds };
   });
   resources.reconcileAccountState(balances);
-  return result;
+  resources.onChange?.();
+  return {
+    ...result,
+    keyProvisioningAccountIds: provisioningAccounts(resources, source),
+  };
 }

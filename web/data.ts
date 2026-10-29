@@ -77,7 +77,7 @@ export type Account = {
     id: string;
     name: string;
     secretState: string;
-  credentialStatus: string;
+    credentialStatus: string;
     present?: boolean;
     baseUrl: string;
     models: string[];
@@ -152,7 +152,7 @@ export type Channel = {
   order?: number;
   recoveryPolicy?: { enabled: boolean };
   credentialStatus: string;
-  synchronization?: { target: string; state: string }[];
+  synchronization?: { target: string; state: string; reason?: string | null }[];
   runtimeIssue?: { type: "rate" | "quota"; at: string; reason: string } | null;
   mode?: "auto" | "manual";
   management?: { state?: string; prohibited?: boolean; fixed?: boolean };
@@ -437,10 +437,11 @@ export function activeModels(c: Channel) {
   );
 }
 export function channelStatus(c: Channel): { label: string; tone: Tone } {
-  if (c.recovery.pending) return { label: c.recovery.reason, tone: "amber" };
+  if (c.recovery.pending && c.recovery.reason)
+    return { label: c.recovery.reason, tone: "amber" };
   if (c.management?.state === "paused")
     return { label: "人工暂停", tone: "neutral" };
-  if(c.accessMode === "web")return {label:"网页使用",tone:"neutral"};
+  if (c.accessMode === "web") return { label: "网页使用", tone: "neutral" };
   if (c.credentialStatus === "missing")
     return { label: "待补 key", tone: "amber" };
   if (c.usage !== "rp") {
@@ -452,6 +453,8 @@ export function channelStatus(c: Channel): { label: string; tone: Tone } {
       failed: "New API 同步失败",
       conflict: "New API 配置冲突",
     };
+    if (sync?.state === "waiting" && sync.reason?.includes("等待选定模型"))
+      return { label: "New API 已建档 · 待选模型", tone: "amber" };
     if (sync && pending[sync.state])
       return { label: pending[sync.state], tone: "amber" };
     if (c.runtimeEnabled === true)
