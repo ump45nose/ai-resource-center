@@ -98,8 +98,9 @@ export function checkinRows(store, range, siteId) {
         siteName: sites.get(account.siteId).name, businessDate: row.business_date,
         timezone: event.timezone || ZONE, occurredAt: row.occurred_at,
         latestResult: event.result || "待确认", reason: event.reason || null,
+        notRequired: event.result === "无需签到" || event.reason === "balance_threshold",
         method: event.method || null, confirmed: false, confirmedAt: null,
-        applicable: !["account_disabled", "auto_checkin_disabled", "no_provider", "no_selected_method"].includes(event.reason),
+        applicable: event.result !== "无需签到" && !["balance_threshold", "account_disabled", "auto_checkin_disabled", "no_provider", "no_selected_method"].includes(event.reason),
         rewardText: null, reward: null,
       };
       groups.set(key, group);
@@ -132,8 +133,9 @@ export function dailyResources(resources, now = new Date()) {
   const { rows, coverage } = checkinRows(store, { start: date, end: date, timezone: ZONE });
   const sites = new Map(data.sites.filter((s) => !s.removed && !s.mergedInto && !s.resourceExcluded).map((s) => [s.id, s]));
   const accounts = data.accounts.filter((a) => !a.mergedInto && a.role !== "checkin" && sites.has(a.siteId));
-  const expected = accounts.filter((a) => a.enabled !== false && automaticCheckin(store, a));
   const enabled = new Set(accounts.filter((a) => a.enabled !== false).map((a) => a.id));
+  const notRequired = new Set(rows.filter((r) => enabled.has(r.accountId) && r.notRequired && !r.confirmed).map((r) => r.accountId));
+  const expected = accounts.filter((a) => a.enabled !== false && !notRequired.has(a.id) && automaticCheckin(store, a));
   const today = rows.filter((r) => enabled.has(r.accountId) && (r.applicable || r.confirmed));
   const observed = new Set(today.map((r) => r.accountId));
   const channels = data.channels.filter((c) => !isRemoved(c) && !isInternal(c) && !c.mergedInto && sites.has(c.siteId));
@@ -142,7 +144,7 @@ export function dailyResources(resources, now = new Date()) {
   return {
     date, timezone: ZONE, observedAt: now.toISOString(),
     checkinSummary: { expected: new Set([...expected.map((a) => a.id), ...observed]).size,
-      automaticExpected: expected.length, observed: today.length,
+      automaticExpected: expected.length, observed: today.length, notRequired: notRequired.size,
       completed: today.filter((r) => r.confirmed).length,
       failed: today.filter((r) => !r.confirmed && ["失败", "需登录", "需人工操作", "无法签到"].includes(r.latestResult)).length,
       unconfirmed: today.filter((r) => !r.confirmed && !["失败", "需登录", "需人工操作", "无法签到"].includes(r.latestResult)).length,
