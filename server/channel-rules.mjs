@@ -90,6 +90,7 @@ export function archiveOf(c, site) {
   return [...issues];
 }
 export function gatewayBlock(c) {
+  if (c.accessMode === "web") return "网页账号，调用 API 尚未接入";
   if (usageOf(c) === "rp") return "酒馆分组只在酒馆维护，不导入 New API";
   if (c.gatewayAllowed === false) return "此渠道不允许导入 New API";
   return null;
@@ -136,6 +137,7 @@ export function validateTags(tags) {
 }
 
 export function probeBlock(store, c, channels) {
+  if (c.accessMode === "web") return "网页资源尚无调用 API";
   if (c.mergedInto || c.sourceOnly) return "已合并或仅来源资料";
   if (isRemoved(c) || c.management?.prohibited) return "已移除或禁止使用";
   if (isInternal(c)) return "内部订阅转发，本版不接入";

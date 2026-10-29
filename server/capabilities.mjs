@@ -178,6 +178,7 @@ export function capabilities({
   maintenance,
   distribution,
   rp,
+  bookmarks,
 }) {
   const all = [];
   const add = (
@@ -200,10 +201,31 @@ export function capabilities({
       write,
       ...options,
     });
-  add("list_rp_connections", "GET", "/rp/connections", "酒馆连接与同步状态", {channelId: text.optional()},
-    (a,auth) => { const result=rp.list(auth); return {...result,items:result.items.filter(b=>!a.channelId||b.channelId===a.channelId)}; });
-  add("update_rp_connection", "PATCH", "/rp/connections/:id", "修改酒馆连接，独立保存选定模型", {id:text,...rpEditSchema.shape},
-    (a,auth)=>rp.edit(auth,a.id,a),true);
+  add(
+    "list_rp_connections",
+    "GET",
+    "/rp/connections",
+    "酒馆连接与同步状态",
+    { channelId: text.optional() },
+    (a, auth) => {
+      const result = rp.list(auth);
+      return {
+        ...result,
+        items: result.items.filter(
+          (b) => !a.channelId || b.channelId === a.channelId,
+        ),
+      };
+    },
+  );
+  add(
+    "update_rp_connection",
+    "PATCH",
+    "/rp/connections/:id",
+    "修改酒馆连接，独立保存选定模型",
+    { id: text, ...rpEditSchema.shape },
+    (a, auth) => rp.edit(auth, a.id, a),
+    true,
+  );
   add(
     "capabilities",
     "GET",
@@ -242,10 +264,17 @@ export function capabilities({
     () => resources.overview(),
   );
   add(
-    "list_checkins", "GET", "/checkins",
+    "list_checkins",
+    "GET",
+    "/checkins",
     "按业务日期和受益账号归并签到记录，保留最新尝试和已确认成果",
-    { cursor: listing.cursor, limit: listing.limit, siteId: text.optional(),
-      start_date: z.string().optional(), end_date: z.string().optional() },
+    {
+      cursor: listing.cursor,
+      limit: listing.limit,
+      siteId: text.optional(),
+      start_date: z.string().optional(),
+      end_date: z.string().optional(),
+    },
     (query) => listCheckins(store, query),
   );
   add(
@@ -915,6 +944,49 @@ export function capabilities({
     "原调度层任务目录，不复制正文和投递配置",
     listing,
     (a) => paginate(store.list("task"), a),
+  );
+  add(
+    "list_bookmark_imports",
+    "GET",
+    "/bookmark-imports",
+    "书签新增渠道与自动导入失败队列",
+    listing,
+    (a) => paginate(store.list("bookmark-import").reverse(), a),
+  );
+  add(
+    "retry_bookmark_import",
+    "POST",
+    "/bookmark-imports/:id/retry",
+    "重试新增书签的原生导入",
+    { id: text },
+    ({ id }) => {
+      const job = store.require("bookmark-import", id);
+      if (job.state === "model_running")
+        throw new Problem(409, "模型任务正在执行，请等待本轮结果");
+      return store.put("bookmark-import", {
+        ...job,
+        state: job.recipe ? "recipe_ready" : "pending_native",
+        reason: null,
+        nextAttemptAt: null,
+        version: job.version + 1,
+      });
+    },
+    true,
+  );
+  add(
+    "tag_task",
+    "PATCH",
+    "/cron/tasks/:id",
+    "标记可用于渠道验证的 cron",
+    {
+      id: text,
+      version,
+      changes: z
+        .object({ tags: z.array(z.enum(["channel_test"])).max(1) })
+        .strict(),
+    },
+    ({ id, version, changes }) => store.update("task", id, version, changes),
+    true,
   );
   add(
     "list_bindings",

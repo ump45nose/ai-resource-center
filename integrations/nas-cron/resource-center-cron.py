@@ -6,6 +6,7 @@ marker before inference; interrupted runs report uncertainty instead of regenera
 """
 import argparse
 from datetime import datetime, timezone
+from urllib.error import HTTPError
 import fcntl
 import json
 import os
@@ -100,11 +101,24 @@ def execute(client, work):
         private_json(ledger, {**old, 'receipt': receipt, 'state': 'interrupted'})
         return client.result(receipt)
     jobs = json.loads((Path(config['profile']) / 'cron/jobs.json').read_text())
-    job = next((j for j in (jobs['jobs'] if isinstance(jobs,dict) else jobs) if str(j['id']) == work['taskId']), None)
+    job = next((j for j in [*(jobs['jobs'] if isinstance(jobs,dict) else jobs),*config.get('externalTasks',[])] if str(j['id']) == work['taskId']), None)
     if not job or not job.get('enabled', True) or work['taskId'] not in config.get('previewTaskIds', []):
         return {'state': 'waiting', 'reason': '原任务暂停或未适配'}
-    material, material_path = daily_material(config)
-    prepared = client.prepare(work['taskId'], run_id, work.get('bindingId'), 'preview')
+    onboarding = work['taskId'] == config.get('onboardingTaskId')
+    if onboarding:
+        available = client.request('/cron/bookmark-imports/available', None, method='GET')['available']
+        if not available:
+            return {'state':'waiting','reason':'暂无新增书签失败任务，不发起验证调用'}
+        material={'day':datetime.now(timezone.utc).date().isoformat()}
+        material_path='bookmark-imports'
+    else:
+        material, material_path = daily_material(config)
+    try:
+        prepared = client.prepare(work['taskId'], run_id, work.get('bindingId'), 'preview')
+    except HTTPError as error:
+        if error.code == 409:
+            return {'state':'waiting','reason':json.loads(error.read()).get('message','等待验证连接')}
+        raise
     if prepared.get('state') != 'prepared':
         return prepared
     # The ledger contains no inference credentials.
@@ -114,7 +128,15 @@ def execute(client, work):
         'actualModelId': prepared['modelId'], 'usedFallback': False, 'capabilityClass': 'unclassified',
         'materialDate': material['day']}
     try:
-        value, checks, request_id, elapsed = generate(config, prepared, material, job)
+        if onboarding:
+            import importlib.util
+            spec=importlib.util.spec_from_file_location('bookmark_onboarding',HERE/'bookmark-onboarding.py')
+            module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+            start=time.monotonic();value=module.run(client,run_id,prepared)
+            checks={'processed':value.get('processed',0)>0,'resolved':value.get('passed',False)}
+            request_id=value.get('requestId');elapsed=round((time.monotonic()-start)*1000)
+        else:
+            value, checks, request_id, elapsed = generate(config, prepared, material, job)
         artifact = state_dir / (run_id + '.preview.json')
         private_json(artifact, {'materialDate': material['day'], 'taskId': work['taskId'], **value, 'checks': checks})
         receipt.update(result='success', acceptance='passed' if all(checks.values()) else 'failed',
@@ -135,6 +157,7 @@ def main():
     p.add_argument('--catalog', action='store_true')
     p.add_argument('--work', action='store_true')
     p.add_argument('--flush', action='store_true')
+    p.add_argument('--bookmarks', action='store_true')
     p.add_argument('--task-id')
     p.add_argument('--binding-id')
     p.add_argument('--run-id')
@@ -147,7 +170,12 @@ def main():
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             return
-        if args.catalog:
+        if args.bookmarks:
+            import importlib.util
+            spec=importlib.util.spec_from_file_location('bookmark_onboarding',HERE/'bookmark-onboarding.py')
+            module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+            result=module.run(client,'bookmarks-'+datetime.now(timezone.utc).date().isoformat())
+        elif args.catalog:
             result = publish_profile(client, client.config['profile'])
         elif args.work:
             client.flush()

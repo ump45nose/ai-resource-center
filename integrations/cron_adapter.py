@@ -71,6 +71,7 @@ def publish_profile(client, profile):
               "supportsPreview": str(job["id"]) in previews,
               "supportsScheduledRunConfig": str(job["id"]) in configured}
              for job in jobs]
+    tasks.extend(client.config.get("externalTasks", []))
     return client.publish(tasks)
 
 

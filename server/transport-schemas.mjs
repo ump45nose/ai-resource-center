@@ -1,11 +1,21 @@
 import { hubInventorySchema, hubCredentialsSchema } from "./hub-ingest.mjs";
 import { z } from "zod";
 import { accountEvent } from "./ingest.mjs";
-import { rpInventorySchema, rpSaveSchema, rpCredentialSchema, rpArchiveSchema, rpResolveSchema, rpCallSchema } from "./rp-sync.mjs";
+import {
+  rpInventorySchema,
+  rpSaveSchema,
+  rpCredentialSchema,
+  rpArchiveSchema,
+  rpResolveSchema,
+  rpCallSchema,
+} from "./rp-sync.mjs";
 export const accessSchema = z.object({
   role: z.enum(["read", "manage", "ingest", "cron", "rp", "connector"]),
-  sourceId: z.string().optional(), channelIds: z.array(z.string()).optional(),
-  rpInstanceId: z.string().min(1).max(160).optional(), rpUserId: z.string().min(1).max(160).optional(), rpRegistration: z.boolean().optional(),
+  sourceId: z.string().optional(),
+  channelIds: z.array(z.string()).optional(),
+  rpInstanceId: z.string().min(1).max(160).optional(),
+  rpUserId: z.string().min(1).max(160).optional(),
+  rpRegistration: z.boolean().optional(),
   target: z.enum(["all-api-hub", "chrome-bookmarks", "sillytavern"]).optional(),
 });
 
@@ -20,6 +30,11 @@ export const taskCatalogSchema = z
           schedule: z.unknown().optional(),
           timezone: z.string().optional(),
           supportsRunConfig: z.boolean(),
+          requiresBookmarkWork: z.boolean().optional(),
+          tags: z
+            .array(z.enum(["channel_test"]))
+            .max(1)
+            .optional(),
           supportsResult: z.boolean(),
           supportsPreview: z.boolean().optional(),
           supportsScheduledRunConfig: z.boolean().optional(),
@@ -132,16 +147,35 @@ const operation = identified.extend({
 });
 export const outputs = {
   resource_list_checkins: z.object({
-    items: z.array(z.object({
-      id: z.string(), accountId: z.string(), executorAccountId: z.string(),
-      siteId: z.string(), businessDate: z.string(), timezone: z.string(),
-      occurredAt: z.string(), latestResult: z.string(), confirmed: z.boolean(),
-      confirmedAt: z.string().nullable(), rewardText: z.string().nullable(), reward: z.null(),
-    }).loose()),
+    items: z.array(
+      z
+        .object({
+          id: z.string(),
+          accountId: z.string(),
+          executorAccountId: z.string(),
+          siteId: z.string(),
+          businessDate: z.string(),
+          timezone: z.string(),
+          occurredAt: z.string(),
+          latestResult: z.string(),
+          confirmed: z.boolean(),
+          confirmedAt: z.string().nullable(),
+          rewardText: z.string().nullable(),
+          reward: z.null(),
+        })
+        .loose(),
+    ),
     nextCursor: z.string().nullable(),
-    coverage: z.object({ startDate: z.string(), endDate: z.string(), timezone: z.string(),
-      firstRecordedDate: z.string().nullable(), lastRecordedDate: z.string().nullable(),
-      complete: z.boolean(), unresolvedAccounts: z.number().int(), basis: z.string() }),
+    coverage: z.object({
+      startDate: z.string(),
+      endDate: z.string(),
+      timezone: z.string(),
+      firstRecordedDate: z.string().nullable(),
+      lastRecordedDate: z.string().nullable(),
+      complete: z.boolean(),
+      unresolvedAccounts: z.number().int(),
+      basis: z.string(),
+    }),
   }),
   resource_list_sites: paged(site),
   resource_get_site: site,
@@ -172,14 +206,39 @@ export const outputs = {
   }),
 };
 export const transportRoutes = [
-  ["GET", "/api/v2/rp/identity", z.object({}), "核对配对的来源、实例与酒馆用户"],
-  ["POST", "/api/v2/access", accessSchema, "管理员签发来源或实例与用户受限的接入凭据"],
-  ["POST", "/api/v2/rp/inventory", rpInventorySchema, "登记配对实例与用户的已保存连接"],
+  [
+    "GET",
+    "/api/v2/rp/identity",
+    z.object({}),
+    "核对配对的来源、实例与酒馆用户",
+  ],
+  [
+    "POST",
+    "/api/v2/access",
+    accessSchema,
+    "管理员签发来源或实例与用户受限的接入凭据",
+  ],
+  [
+    "POST",
+    "/api/v2/rp/inventory",
+    rpInventorySchema,
+    "登记配对实例与用户的已保存连接",
+  ],
   ["POST", "/api/v2/rp/saves", rpSaveSchema, "上报原生保存及双方配置基线"],
-  ["POST", "/api/v2/rp/credentials", rpCredentialSchema, "独立交付原生连接凭据"],
+  [
+    "POST",
+    "/api/v2/rp/credentials",
+    rpCredentialSchema,
+    "独立交付原生连接凭据",
+  ],
   ["POST", "/api/v2/rp/archive", rpArchiveSchema, "按不可用原因归档已授权连接"],
   ["POST", "/api/v2/rp/resolve", rpResolveSchema, "处理已授权连接的配置冲突"],
-  ["POST", "/api/v2/ingest/rp-calls", rpCallSchema, "接收请求归属和真实调用终态"],
+  [
+    "POST",
+    "/api/v2/ingest/rp-calls",
+    rpCallSchema,
+    "接收请求归属和真实调用终态",
+  ],
   [
     "GET",
     "/api/v2/connector/jobs",

@@ -11,9 +11,12 @@ export function bookmarkPlan(resources) {
   const folders = [
     ...Object.entries(usageLabels).map(([usage, name]) => ({
       path: [name],
-      items: sites.filter((s) =>
-        s.channels.some((c) => c.usage === usage && !c.archiveReasons.length) ||
-        (usage === "general" && !s.channels.length && s.accounts.length),
+      items: sites.filter(
+        (s) =>
+          s.channels.some(
+            (c) => c.usage === usage && !c.archiveReasons.length,
+          ) ||
+          (usage === "general" && !s.channels.length && s.accounts.length),
       ),
     })),
     ...Object.entries(archiveLabels).map(([reason, name]) => ({

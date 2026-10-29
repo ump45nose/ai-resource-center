@@ -77,7 +77,7 @@ export type Account = {
     id: string;
     name: string;
     secretState: string;
-    credentialStatus: string;
+  credentialStatus: string;
     present?: boolean;
     baseUrl: string;
     models: string[];
@@ -128,6 +128,7 @@ export type HistoricalEvaluation = {
   countsTowardCurrentGrade: false;
 };
 export type Channel = {
+  accessMode?: "web" | "api";
   id: string;
   version: number;
   name: string;
@@ -439,6 +440,7 @@ export function channelStatus(c: Channel): { label: string; tone: Tone } {
   if (c.recovery.pending) return { label: c.recovery.reason, tone: "amber" };
   if (c.management?.state === "paused")
     return { label: "人工暂停", tone: "neutral" };
+  if(c.accessMode === "web")return {label:"网页使用",tone:"neutral"};
   if (c.credentialStatus === "missing")
     return { label: "待补 key", tone: "amber" };
   if (c.usage !== "rp") {

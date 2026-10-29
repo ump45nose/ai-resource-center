@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import BookmarkImports from "../BookmarkImports";
 import SyncTargets from "../SyncTargets";
 import {
   ArrowRight,
@@ -314,6 +315,7 @@ export default function Sources() {
         })}
       </div>
       <SyncTargets />
+      <BookmarkImports />
       <section className="paper-section">
         <SectionHeading
           title="同步与操作记录"

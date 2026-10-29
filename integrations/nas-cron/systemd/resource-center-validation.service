@@ -5,5 +5,5 @@ After=network-online.target
 Type=oneshot
 User=yuwk
 UMask=0077
-TimeoutStartSec=8min
+TimeoutStartSec=20min
 ExecStart=/home/hermes/.hermes/hermes-agent/venv/bin/python /home/yuwk/cron/resource-center/resource-center-cron.py --config /home/yuwk/cron/env/resource-center.json --work

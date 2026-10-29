@@ -1,3 +1,4 @@
+import { hasBookmarkWork } from "./bookmark-imports.mjs";
 import {
   autoManaged,
   autoScope,
@@ -123,7 +124,25 @@ export class Maintenance {
       )
         return b;
     }
-    return null;
+    const task = this.store
+      .list("task")
+      .find(
+        (t) =>
+          t.enabled &&
+          t.tags?.includes("channel_test") &&
+          t.supportsRunConfig &&
+          t.supportsResult &&
+          t.supportsPreview &&
+          (!t.requiresBookmarkWork || hasBookmarkWork(this.store)) &&
+          !taskBlock(c, t),
+      );
+    return task
+      ? {
+          taskRef: { source: task.source, id: task.externalId },
+          validationOnly: true,
+          discoverNewModels: true,
+        }
+      : null;
   }
   status(c, options) {
     const status = maintenanceStatus(this.store, c, options);
