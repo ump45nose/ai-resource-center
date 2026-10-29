@@ -68,6 +68,7 @@ const benefit = z
       .optional(),
     validity: z.string().optional(),
     dailyLimit: z.number().nonnegative().optional(),
+    balanceMode: z.enum(["observed", "fixed_daily"]).optional(),
     renewal: z.enum(["automatic", "checkin"]).optional(),
   })
   .strict();

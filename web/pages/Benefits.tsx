@@ -42,7 +42,7 @@ export default function Benefits() {
                   <div className="benefit-account">
                     <div>
                       <strong>{a.name}</strong>
-                      <span>余额 {amount(a.balance, a.unit)}</span>
+                      <span>{a.entitlement.balanceBasis === "fixed_daily" ? "每日固定额度" : "余额"} {amount(a.balance, a.unit)}</span>
                     </div>
                     <Badge tone={status?.tone || "neutral"}>
                       {status
@@ -59,7 +59,8 @@ export default function Benefits() {
                             ? "当日额度"
                             : "长期 / 待确认"}
                       </strong>
-                      <span>余额观察 {dateTime(a.confirmedAt)}</span>
+                      {a.entitlement.balanceBasis !== "fixed_daily" &&
+                        <span>余额观察 {dateTime(a.confirmedAt)}</span>}
                     </div>
                   </div>
                   {a.checkins.length > 0 && (

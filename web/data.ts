@@ -59,6 +59,7 @@ export type Account = {
     tz?: string;
     resetAt?: string;
     dailyLimit?: number;
+    balanceMode?: "observed" | "fixed_daily";
     renewal?: "automatic" | "checkin";
     releaseTimes?: string[];
     windows?: { start: string; end: string }[];
@@ -111,6 +112,7 @@ export type Account = {
     available: boolean;
     reasons: string[];
     balanceCurrent?: boolean;
+    balanceBasis?: "observed" | "fixed_daily";
     dailyBalance?: number | null;
     longBalance?: number | null;
   };

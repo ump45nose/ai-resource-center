@@ -1,3 +1,4 @@
+import { nextReset } from "./domain.mjs";
 import {
   probeBlock,
   archiveOf,
@@ -41,6 +42,7 @@ export function policies(store) {
 }
 
 export function currentBalance(account, now = new Date()) {
+  if (account?.benefit?.balanceMode === "fixed_daily") return true;
   const at = Date.parse(account?.confirmedAt);
   return (
     account?.balance != null &&
@@ -53,17 +55,21 @@ export function entitlement(account, now = new Date()) {
   const benefit = account?.benefit || {},
     reasons = [];
   const timezone = benefit.tz || "Asia/Shanghai";
+  const fixedDaily = benefit.balanceMode === "fixed_daily";
+  const balance = fixedDaily ? benefit.dailyLimit : account?.balance;
   const balanceCurrent = currentBalance(account, now);
-  const dailyExpired =
-    !!account?.validUntil && new Date(account.validUntil) <= now;
+  const expiresAt = fixedDaily
+    ? nextReset(now.toISOString(), timezone, benefit.resetAt || "00:00")
+    : account?.validUntil || null;
+  const dailyExpired = !!expiresAt && new Date(expiresAt) <= now;
   const hasPools =
     account?.dailyBalance != null || account?.longBalance != null;
-  const dailyBalance = hasPools
+  const dailyBalance = fixedDaily ? balance : hasPools
     ? account.dailyBalance
     : account?.quota === "daily"
       ? account.balance
       : null;
-  const longBalance = hasPools
+  const longBalance = fixedDaily ? null : hasPools
     ? account.longBalance
     : account?.quota !== "daily"
       ? account?.balance
@@ -74,7 +80,7 @@ export function entitlement(account, now = new Date()) {
     balanceCurrent &&
     !dailyAvailable &&
     !longAvailable &&
-    (hasPools || account.balance <= 0)
+    (hasPools || balance <= 0)
   )
     reasons.push("余额耗尽");
   if (dailyExpired && !longAvailable && account?.quota === "daily")
@@ -99,16 +105,17 @@ export function entitlement(account, now = new Date()) {
     availability: !balanceCurrent ? "unknown" : reasons.length ? "unavailable" : "available",
     reasons,
     timezone,
-    balance: account?.balance ?? null,
+    balance: balance ?? null,
+    balanceBasis: fixedDaily ? "fixed_daily" : "observed",
     balanceCurrent,
-    balanceObservedAt: account?.confirmedAt || null,
+    balanceObservedAt: fixedDaily ? null : account?.confirmedAt || null,
     unit: account?.unit || "待确认",
-    expiresAt: account?.validUntil || null,
+    expiresAt,
     daily:
       account?.enabled !== false &&
       !account?.mergedInto &&
       dailyAvailable &&
-      !!account.validUntil,
+      !!expiresAt,
     dailyBalance: dailyExpired ? 0 : dailyBalance ?? null,
     longBalance: longBalance ?? null,
     dailyLimit: benefit.dailyLimit ?? null,

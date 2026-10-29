@@ -531,6 +531,7 @@ export class Resources {
     const accounts = data.accounts
       .filter((a) => a.siteId === id && !a.mergedInto && a.role !== "checkin")
       .map((a) => {
+        const rights = entitlement(a);
         const executor = a.checkinAccountId
           ? data.accounts.find((x) => x.id === a.checkinAccountId)
           : a;
@@ -545,9 +546,10 @@ export class Resources {
           }));
         return {
           ...publicValue(a),
+          ...(rights.balanceBasis === "fixed_daily" ? {balance: rights.balance} : {}),
           automaticCheckin: a.enabled !== false && automaticCheckin(this.store, a),
           integration: this.distribution?.hubEligibility(a),
-          entitlement: entitlement(a),
+          entitlement: rights,
           checkins,
           ...(executor.id !== a.id
             ? {
@@ -669,7 +671,8 @@ export class Resources {
     const data = this.snapshot(),
       offerings = data.offerings;
     const rows = data.channels
-      .filter((c) => !removed(c) && !isInternal(c))
+      .filter((c) => !removed(c) && !isInternal(c) &&
+        !this.store.get("site", c.siteId)?.resourceExcluded)
       .flatMap((c) => {
         const scan = this.scanObservation(c, data);
         const names = new Set([
@@ -732,7 +735,8 @@ export class Resources {
     const rows = [];
     for (const c of this.store
       .list("channel")
-      .filter((c) => !removed(c) && !isInternal(c))) {
+      .filter((c) => !removed(c) && !isInternal(c) &&
+        !this.store.get("site", c.siteId)?.resourceExcluded)) {
       const kind =
         !c.credentialId && !c.gateway && !c.nativeCredentialRef
           ? "missing_key"
@@ -770,11 +774,12 @@ export class Resources {
   overview() {
     const channels = this.store
       .list("channel")
-      .filter((c) => !removed(c) && !isInternal(c));
+      .filter((c) => !removed(c) && !isInternal(c) &&
+        !this.store.get("site", c.siteId)?.resourceExcluded);
     const accounts = this.store.list("account");
     return {
       observedAt: new Date().toISOString(),
-      sites: this.store.list("site").filter((s) => !s.removed).length,
+      sites: this.store.list("site").filter((s) => !s.removed && !s.mergedInto && !s.resourceExcluded).length,
       channels: Object.fromEntries(
         ["general", "media", "rp", "client"].map((p) => [
           p,
@@ -783,7 +788,8 @@ export class Resources {
       ),
       dailyEntitlements: accounts
         .filter(
-          (a) => !a.mergedInto && a.enabled !== false && entitlement(a).daily,
+          (a) => !a.mergedInto && a.enabled !== false &&
+            !this.store.get("site", a.siteId)?.resourceExcluded && entitlement(a).daily,
         )
         .map((a) => ({ accountId: a.id, ...entitlement(a) })),
       checkins: this.store.db

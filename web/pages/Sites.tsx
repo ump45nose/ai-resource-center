@@ -522,6 +522,8 @@ export default function Sites() {
                     ) : (
                       <span className="muted">未取得余额</span>
                     )}
+                    {site.accounts.some(a => a.entitlement.balanceBasis === "fixed_daily") &&
+                      <span className="muted">每日固定额度</span>}
                     {site.accounts.some(
                       (a) =>
                         a.balance != null &&
