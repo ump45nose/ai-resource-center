@@ -43,6 +43,7 @@ const account = z
         availability: z.enum(["enabled", "disabled"]).optional(),
         ineligibleReason: z.enum(["balance_threshold"]).optional(),
         statusObservedAt: z.iso.datetime().optional(),
+        businessDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
         supported: z.boolean().optional(),
         supportStatus: z
           .enum(["supported", "unsupported", "unknown"])
