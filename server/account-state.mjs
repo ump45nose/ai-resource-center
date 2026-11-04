@@ -6,6 +6,8 @@ import {
   tagsOf,
 } from "./channel-rules.mjs";
 import { currentBalance, entitlement } from "./maintenance-policy.mjs";
+import { archiveChannel } from "./channel-health.mjs";
+import { observeSuccess } from "./failure-window.mjs";
 
 export function checkinAccount(store, account) {
   return account.checkinAccountId
@@ -18,6 +20,7 @@ export function automaticCheckin(store, account) {
     observation = executor.sourceObservation;
   return (
     account.checkinEnabled !== false &&
+    !executor.checkinArchive?.active &&
     executor.checkinEnabled !== false &&
     executor.enabled !== false &&
     observation?.source === "all-api-hub" &&
@@ -94,6 +97,10 @@ export function archiveDepletedAccounts(store, accountIds) {
   const archived = [];
   for (const id of new Set(accountIds)) {
     const account = store.require("account", id);
+    if (currentBalance(account) && (entitlement(account).dailyBalance > 0 || entitlement(account).longBalance > 0)) {
+      for (const c of store.list("channel").filter((c) => c.accountId === id))
+        observeSuccess(store, "channel", c.id, "balance", account.confirmedAt);
+    }
     if (
       account.role === "checkin" ||
       !currentBalance(account) ||
@@ -121,23 +128,10 @@ export function archiveDepletedAccounts(store, accountIds) {
           !c.management?.prohibited &&
           c.management?.state !== "paused",
       )) {
-      const at = new Date().toISOString();
-      store.update("channel", c.id, c.version, {
-        enabled: false,
-        archiveReason: "balance",
-        availability: "无余额无签到",
-        archiveNote: "余额已耗尽，未启用自动签到",
-        archivedAt: at,
-        management: { ...c.management, state: "maintenance" },
-        autoArchive: {
-          reason: "balance",
-          accountId: id,
-          balanceObservedAt: account.confirmedAt,
-          at,
-        },
-        curation: { ...c.curation, authority: "center", updatedAt: at },
-      });
-      archived.push(c.id);
+      if (archiveChannel(store, c.id, "balance", {
+        id: `balance:${id}:${account.confirmedAt}`, source: "balance",
+        at: account.confirmedAt, reason: "余额已耗尽，未启用自动签到",
+      })) archived.push(c.id);
     }
   }
   return archived;

@@ -31,6 +31,8 @@ type Policy = {
   closedHours: number;
   keyRetryHours: number;
   newModelsHours: number;
+  archiveAfterDays: number;
+  archiveReviewHours: number;
   maxCandidates: number;
   maxEvaluationsPerDay: number;
   modelRules: { match: string; capabilityClass: "strong" | "execution" }[];
@@ -673,6 +675,8 @@ function MaintenanceSettings({
               ["maintenanceHours", "维护渠道 / 小时"],
               ["closedHours", "关闭网站 / 小时"],
               ["keyRetryHours", "key 复查 / 小时"],
+              ["archiveAfterDays", "持续故障归档 / 天"],
+              ["archiveReviewHours", "归档后复查 / 小时"],
               ["newModelsHours", "模型复验 / 小时"],
               ["maxCandidates", "每渠道每轮候选"],
               ["maxEvaluationsPerDay", "每日任务次数上限"],
@@ -683,10 +687,12 @@ function MaintenanceSettings({
               {label}
               <input
                 type="number"
-                min={key === "smokeMaxTokens" ? 256 : 1}
+                min={key === "smokeMaxTokens" ? 256 : key === "archiveReviewHours" ? 24 : 1}
                 max={
                   key === "maxCandidates"
                     ? 20
+                    : key === "archiveAfterDays" ? 365
+                    : key === "archiveReviewHours" ? 8760
                     : key === "smokeMaxTokens"
                       ? 4096
                       : undefined

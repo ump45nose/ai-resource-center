@@ -322,7 +322,7 @@ export class Distribution {
               name: s.name,
               url: s.url,
               checkinUrl: s.checkinUrl || null,
-              automaticExecutionEnabled: a.checkinAccountId
+              automaticExecutionEnabled: a.checkinAccountId || a.checkinArchive?.active
                 ? false
                 : a.checkinEnabled ?? null,
               disabled: a.enabled == null ? null : !a.enabled,
@@ -363,6 +363,7 @@ export class Distribution {
             active(c) &&
             (id === "newapi"
               ? usageOf(c) !== "rp" && c.gatewayAllowed !== false
+                && routableModels(this.store, c).length > 0
               : usageOf(c) === "rp"),
           order: c.order || 0,
           credentialId: c.credentialId || null,

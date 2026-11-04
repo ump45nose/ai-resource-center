@@ -172,6 +172,7 @@ export const outputs = {
   }),
 };
 export const transportRoutes = [
+  ["GET", "/api/v2/ingest/checkin-policy", z.object({}), "读取本来源账号的签到归档与复查策略"],
   ["GET", "/api/v2/rp/identity", z.object({}), "核对配对的来源、实例与酒馆用户"],
   ["POST", "/api/v2/access", accessSchema, "管理员签发来源或实例与用户受限的接入凭据"],
   ["POST", "/api/v2/rp/inventory", rpInventorySchema, "登记配对实例与用户的已保存连接"],

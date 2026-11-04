@@ -1861,6 +1861,13 @@
                             "type": "number",
                             "minimum": 0
                           },
+                          "balanceMode": {
+                            "type": "string",
+                            "enum": [
+                              "observed",
+                              "fixed_daily"
+                            ]
+                          },
                           "renewal": {
                             "type": "string",
                             "enum": [
@@ -2288,6 +2295,13 @@
                           "dailyLimit": {
                             "type": "number",
                             "minimum": 0
+                          },
+                          "balanceMode": {
+                            "type": "string",
+                            "enum": [
+                              "observed",
+                              "fixed_daily"
+                            ]
                           },
                           "renewal": {
                             "type": "string",
@@ -3803,6 +3817,16 @@
                       "newModelsHours": {
                         "type": "number",
                         "minimum": 1
+                      },
+                      "archiveAfterDays": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 365
+                      },
+                      "archiveReviewHours": {
+                        "type": "integer",
+                        "minimum": 24,
+                        "maximum": 8760
                       },
                       "scanConcurrency": {
                         "type": "integer",
@@ -6120,6 +6144,36 @@
         }
       }
     },
+    "/api/v2/ingest/checkin-policy": {
+      "get": {
+        "operationId": "api_v2_ingest_checkin_policy",
+        "summary": "读取本来源账号的签到归档与复查策略",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "操作结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权"
+          },
+          "403": {
+            "description": "来源不匹配"
+          }
+        }
+      }
+    },
     "/api/v2/rp/identity": {
       "get": {
         "operationId": "api_v2_rp_identity",
@@ -7187,6 +7241,24 @@
                         },
                         "siteType": {
                           "type": "string"
+                        },
+                        "health": {
+                          "type": "object",
+                          "properties": {
+                            "status": {
+                              "type": "string"
+                            },
+                            "reason": {
+                              "type": "string"
+                            },
+                            "code": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "status"
+                          ],
+                          "additionalProperties": false
                         },
                         "checkin": {
                           "type": "object",
