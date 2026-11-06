@@ -4,9 +4,9 @@ import { dayKey } from "./domain.mjs";
 import { Problem } from "./errors.mjs";
 import { entitlement, verified } from "./maintenance-policy.mjs";
 import { isInternal, isRemoved } from "./channel-rules.mjs";
+import { confirmedCheckin } from "./checkin-health.mjs";
 
 const ZONE = "Asia/Taipei";
-const successful = new Set(["成功", "已签到"]);
 
 export function dateRange(query = {}, now = new Date()) {
   const today = dayKey(now, ZONE);
@@ -100,12 +100,12 @@ export function checkinRows(store, range, siteId) {
         latestResult: event.result || "待确认", reason: event.reason || null,
         notRequired: event.result === "无需签到" || event.reason === "balance_threshold",
         method: event.method || null, confirmed: false, confirmedAt: null,
-        applicable: event.result !== "无需签到" && !["balance_threshold", "account_disabled", "auto_checkin_disabled", "no_provider", "no_selected_method"].includes(event.reason),
+        applicable: !executor.checkinArchive?.active && event.result !== "无需签到" && !["balance_threshold", "account_disabled", "auto_checkin_disabled", "center_archived", "no_provider", "no_selected_method"].includes(event.reason),
         rewardText: null, reward: null,
       };
       groups.set(key, group);
     }
-    if (successful.has(event.result)) {
+    if (confirmedCheckin(event)) {
       group.confirmed = true;
       group.confirmedAt ||= row.occurred_at;
       group.rewardText ||= event.reward || null;

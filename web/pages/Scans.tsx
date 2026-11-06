@@ -20,6 +20,7 @@ import {
   type Operation,
 } from "../data";
 import { useWorkspace } from "../workspace";
+import ChannelPools from "./ChannelPools";
 
 type Policy = {
   enabled: boolean;
@@ -31,6 +32,8 @@ type Policy = {
   closedHours: number;
   keyRetryHours: number;
   newModelsHours: number;
+  archiveAfterDays: number;
+  archiveReviewHours: number;
   maxCandidates: number;
   maxEvaluationsPerDay: number;
   modelRules: { match: string; capabilityClass: "strong" | "execution" }[];
@@ -68,8 +71,10 @@ type Summary = {
     id: string;
     version: number;
     taskName: string;
-    channelId: string;
-    modelId: string;
+    channelId?: string;
+    modelId?: string;
+    poolId?: string;
+    poolName?: string;
     enabled: boolean;
     validationOnly?: boolean;
   }[];
@@ -110,6 +115,7 @@ export default function Scans() {
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const [settings, setSettings] = useState(false),
+    [poolSettings, setPoolSettings] = useState(false),
     [modelChannel, setModelChannel] = useState<string | null>(null);
   const entries = sites.flatMap((site) =>
     site.channels.map((channel) => ({ site, channel })),
@@ -169,6 +175,7 @@ export default function Scans() {
         <div>
           <p>扫描目录与站方表现，再用任务验证；通过后同步 New API。</p>
         </div>
+        <Button onClick={() => setPoolSettings(true)}>渠道池与任务</Button>
         <Button onClick={() => setSettings(true)} disabled={!summary}>
           <Settings2 size={15} />
           维护设置
@@ -443,7 +450,7 @@ export default function Scans() {
         <section className="maintenance-history">
           <SectionHeading
             title="任务绑定"
-            meta="使用 fn 原任务；验证绑定不更改正式模型或投递"
+            meta="正常任务绑定渠道池，按优先级自动选型；验证预览保留独立绑定"
           />
           <div className="maintenance-log">
             {summary.bindings.map((b) => (
@@ -454,11 +461,10 @@ export default function Scans() {
                 <span>
                   <strong>{b.taskName}</strong>
                   <small>
-                    {
+                    {b.poolId ? `${b.poolName || "渠道池"} · 按优先级自动选型` : <>{
                       entries.find((e) => e.channel.id === b.channelId)?.channel
                         .name
-                    }{" "}
-                    · {b.modelId} ·{" "}
+                    } · {b.modelId}</>} ·{" "}
                     {b.validationOnly ? "仅用于验证预览" : "正常任务绑定"}
                   </small>
                 </span>
@@ -561,6 +567,9 @@ export default function Scans() {
           </div>
         </section>
       )}
+      {poolSettings && <ChannelPools close={() => setPoolSettings(false)} saved={async () => {
+        await load(); await refresh(); notify("渠道池配置已保存");
+      }} />}
       {settings && summary && (
         <MaintenanceSettings
           summary={summary}
@@ -611,6 +620,7 @@ function MaintenanceSettings({
       enabled: boolean;
       supportsRunConfig: boolean;
       supportsResult: boolean;
+      requiredCapabilities?: string[];
     }[]
   >([]);
   useEffect(() => {
@@ -675,6 +685,8 @@ function MaintenanceSettings({
               ["maintenanceHours", "维护渠道 / 小时"],
               ["closedHours", "关闭网站 / 小时"],
               ["keyRetryHours", "key 复查 / 小时"],
+              ["archiveAfterDays", "持续故障归档 / 天"],
+              ["archiveReviewHours", "归档后复查 / 小时"],
               ["newModelsHours", "模型复验 / 小时"],
               ["maxCandidates", "每渠道每轮候选"],
               ["maxEvaluationsPerDay", "每日任务次数上限"],
@@ -685,10 +697,12 @@ function MaintenanceSettings({
               {label}
               <input
                 type="number"
-                min={key === "smokeMaxTokens" ? 256 : 1}
+                min={key === "smokeMaxTokens" ? 256 : key === "archiveReviewHours" ? 24 : 1}
                 max={
                   key === "maxCandidates"
                     ? 20
+                    : key === "archiveAfterDays" ? 365
+                    : key === "archiveReviewHours" ? 8760
                     : key === "smokeMaxTokens"
                       ? 4096
                       : undefined
@@ -733,7 +747,7 @@ function MaintenanceSettings({
           <div className="task-catalog">
             {tasks.map((t) => (
               <div key={t.id}>
-                <span>{t.name}</span>
+                <span>{t.name}{t.requiredCapabilities?.length ? " · 截图与工具调用" : ""}</span>
                 <label className="check-line"><input type="checkbox" checked={t.tags?.includes("channel_test")||false}
                   onChange={()=>void api(`/cron/tasks/${encodeURIComponent(t.id)}`,"PATCH",{version:t.version,changes:{tags:t.tags?.includes("channel_test")?[]:["channel_test"]}})
                     .then(()=>allPages<(typeof tasks)[number]>("/cron/tasks")).then(setTasks).catch(e=>setError(errorText(e)))}/>
@@ -787,11 +801,13 @@ function ModelTests({
     enabled: boolean;
     supportsRunConfig: boolean;
     supportsResult: boolean;
+    supportsPreview?: boolean;
     supportsScheduledRunConfig?: boolean;
+    requiredCapabilities?: string[];
   };
   const [tasks, setTasks] = useState<Task[]>([]),
-    [taskId, setTaskId] = useState(""),
-    [validationOnly, setValidationOnly] = useState(true);
+    [taskId, setTaskId] = useState("");
+  const validationOnly = true;
   useEffect(() => {
     void allPages<Task>("/cron/tasks")
       .then(setTasks)
@@ -874,28 +890,19 @@ function ModelTests({
         <label>
           验证任务
           <select value={taskId} onChange={(e) => setTaskId(e.target.value)}>
-            <option value="">使用已绑定 cron，否则用小任务</option>
+            <option value="">选择预览任务，否则用小任务</option>
             {tasks
               .filter(
-                (t) => t.enabled && t.supportsRunConfig && t.supportsResult,
+                (t) => t.enabled && t.supportsRunConfig && t.supportsResult && t.supportsPreview !== false,
               )
               .map((t) => (
                 <option key={t.id} value={t.id}>
-                  {t.name}
+                  {t.name}{t.requiredCapabilities?.length ? " · 截图与工具调用" : ""}
                 </option>
               ))}
           </select>
         </label>
-        {taskId && (
-          <label className="toggle-field">
-            <input
-              type="checkbox"
-              checked={validationOnly}
-              onChange={(e) => setValidationOnly(e.target.checked)}
-            />
-            仅用于验证预览，不改正式任务配置和投递
-          </label>
-        )}
+        <p className="muted">正常定时任务请在“渠道池与任务”中绑定渠道池；此处仅安排单模型验证预览。</p>
         {!tasks.some(
           (t) => t.enabled && t.supportsRunConfig && t.supportsResult,
         ) && (

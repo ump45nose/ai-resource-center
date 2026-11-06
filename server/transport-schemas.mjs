@@ -38,6 +38,7 @@ export const taskCatalogSchema = z
           supportsResult: z.boolean(),
           supportsPreview: z.boolean().optional(),
           supportsScheduledRunConfig: z.boolean().optional(),
+          requiredCapabilities: z.array(z.enum(["vision", "tool_calling"])).optional(),
           purpose: z.enum(["code", "chat", "other"]).optional(),
           client: z.string().optional(),
           nsfw: z.boolean().optional(),
@@ -55,6 +56,8 @@ export const prepareSchema = z
     runId: z.string().min(1),
     bindingId: z.string().optional(),
     executionMode: z.enum(["preview", "scheduled"]).default("scheduled"),
+    excludedOfferings: z.array(z.string().min(1)).max(24).optional(),
+    poolRunId: z.string().min(1).max(100).optional(),
   })
   .strict();
 export const taskResultSchema = z
@@ -206,6 +209,7 @@ export const outputs = {
   }),
 };
 export const transportRoutes = [
+  ["GET", "/api/v2/ingest/checkin-policy", z.object({}), "读取本来源账号的签到归档与复查策略"],
   [
     "GET",
     "/api/v2/rp/identity",

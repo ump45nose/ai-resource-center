@@ -5,6 +5,7 @@ import { verified, autoManaged } from "./maintenance-policy.mjs";
 import { eligible, entitlement, policies } from "./resources.mjs";
 import { Problem, errorMessage } from "./errors.mjs";
 import { errorType, errorLabel, dayKey } from "./domain.mjs";
+import { poolCandidates } from "./channel-pools.mjs";
 
 export class Evaluations {
   constructor(store, gateway, operations, fetcher = fetch) {
@@ -53,6 +54,8 @@ export class Evaluations {
     if (input.taskRef) {
       if (input.bindingId) {
         const binding = this.store.require("binding", input.bindingId);
+        if (binding.poolId)
+          throw new Problem(409, "任务已绑定渠道池，在正常运行时按优先级选型，不固定单个模型");
         if (
           !binding.enabled ||
           binding.channelId !== c.id ||
@@ -69,6 +72,8 @@ export class Evaluations {
         throw new Problem(409, "原任务处于暂停状态，不会恢复执行");
       if (!task.supportsRunConfig || !task.supportsResult)
         throw new Problem(409, "任务需要适配单次模型配置和结果回执");
+      if (input.executionMode === "preview" && task.supportsPreview === false)
+        throw new Problem(409, "该任务仅在正常定时运行时验证，不额外执行业务操作");
       progress({
         state: "waiting",
         stage:
@@ -295,6 +300,7 @@ export class Evaluations {
     if (
       task.enabled === false ||
       !task.supportsRunConfig ||
+      (input.executionMode === "preview" && task.supportsPreview === false) ||
       ((input.executionMode || "scheduled") === "scheduled" &&
         task.supportsScheduledRunConfig === false)
     )
@@ -313,7 +319,7 @@ export class Evaluations {
     if (run && run.taskId !== input.taskId)
       throw new Problem(409, "同一个 runId 不能用于另一项任务");
     if (run?.completedAt) return { state: "completed", runId: input.runId };
-    const pending = this.store
+    let pending = this.store
       .list("operation")
       .find(
         (op) =>
@@ -338,6 +344,7 @@ export class Evaluations {
     if (input.bindingId && !binding && !run)
       throw new Problem(409, "绑定已停用或不属于本次任务");
     if (
+      !run?.poolId && !binding?.poolId &&
       pending?.input.automatic &&
       !autoManaged(
         this.store,
@@ -350,9 +357,19 @@ export class Evaluations {
         state: "not_applicable",
         reason: "本次任务没有资源绑定或待验证模型",
       };
+    const poolId = run?.poolId || binding?.poolId;
+    const pool = poolId ? this.store.require("channelPool", poolId) : null;
+    let selection;
+    if (pool && !run) {
+      const candidates = poolCandidates(this.store, pool, task, { excluded: input.excludedOfferings || [] });
+      selection = candidates[0];
+      if (!selection) return { state: "skip", poolId: pool.id, reason: "渠道池暂无符合要求且有可用额度的模型" };
+      // A historical per-model operation cannot override the pool's priority.
+      pending = null;
+    }
     const channelId =
-      run?.channelId || pending?.input.channelId || binding.channelId;
-    const modelId = run?.modelId || pending?.input.modelId || binding.modelId;
+      run?.channelId || selection?.channelId || pending?.input.channelId || binding.channelId;
+    const modelId = run?.modelId || selection?.modelId || pending?.input.modelId || binding.modelId;
     const o = this.offering(channelId, modelId),
       c = this.store.require("channel", channelId);
     const blocked = taskBlock(c, task);
@@ -401,8 +418,12 @@ export class Evaluations {
         operationId: pending?.id,
         bindingId: binding?.id,
         executionMode,
+        requiredCapabilities: task.requiredCapabilities || [],
+        ...(pool ? { poolId: pool.id, poolVersion: pool.version,
+          poolRunId: input.poolRunId || input.runId, selection } : {}),
         createdAt: new Date().toISOString(),
       });
+    if (pool && selection) this.store.put("offering", { ...o, lastPoolSelectionAt: run.createdAt });
     if (
       run.operationId &&
       !this.store.require("operation", run.operationId).claimedRunId
@@ -415,14 +436,30 @@ export class Evaluations {
       });
     if ((c.connectionVersion || 1) !== run.connectionVersion)
       throw new Problem(409, "本次验证期间连接配置已改变，不重复使用旧配置");
-    const config = await this.gateway.inference(o, run.id, {
-      origin: executionMode === "preview" ? "evaluation" : "live",
-    });
+    let config;
+    try {
+      config = await this.gateway.inference(this.store.require("offering", o.id), run.id, {
+        origin: executionMode === "preview" ? "evaluation" : "live",
+      });
+    } catch (error) {
+      if (!pool) throw error;
+      const at = new Date().toISOString(), reason = errorMessage(error);
+      this.store.put("run", { ...run, completedAt: at, preparationFailed: true,
+        verification: { result: "unconfirmed", quality: "unknown", reason, at, method: "preparation" } });
+      this.store.put("offering", { ...this.store.require("offering", o.id),
+        poolFailure: { at, connectionVersion: c.connectionVersion || 1, reason, errorType: "upstream" } });
+      try { await this.gateway.revoke(run.id); await this.gateway.pauseEvaluation(o.id); }
+      catch { this.store.put("run", { ...this.store.require("run", run.id), credentialCleanupPending: true }); }
+      return { state: "unavailable", runId: input.runId, channelId, modelId, poolId: pool.id,
+        maxAttempts: pool.maxAttempts, reason: "候选渠道准备失败，按池优先级尝试下一项" };
+    }
     return {
       state: "prepared",
       runId: input.runId,
       channelId,
       modelId,
+      ...(pool ? { poolId: pool.id, poolRunId: run.poolRunId, maxAttempts: pool.maxAttempts,
+        selection: run.selection } : {}),
       operationId: run.operationId || null,
       configuration: {
         ...config,
@@ -477,7 +514,10 @@ export class Evaluations {
       matched &&
       evidence.successful &&
       input.result === "success" &&
-      input.acceptance === "passed";
+      input.acceptance === "passed" &&
+      (run.requiredCapabilities || []).every(
+        (capability) => input.acceptanceChecks?.[capability] === true,
+      );
     const o = this.store.require("offering", `${run.channelId}:${run.modelId}`);
     const result = {
       result: passed
@@ -498,6 +538,7 @@ export class Evaluations {
       artifactRef: input.artifactRef,
       materialDate: input.materialDate,
       acceptanceChecks: input.acceptanceChecks,
+      verifiedCapabilities: passed ? run.requiredCapabilities || [] : [],
       executionMode: run.executionMode || "scheduled",
       quality: input.acceptance || "unknown",
       capabilityClass: input.capabilityClass || "unclassified",
@@ -521,7 +562,25 @@ export class Evaluations {
         completedAt: new Date().toISOString(),
         verification: result,
       });
-      this.store.put("offering", { ...o, verification: result });
+      const capabilities = Object.fromEntries(["vision", "tool_calling"]
+        .filter(name => input.acceptanceChecks?.[name] === true).map(name => [name, true]));
+      if (input.errorSummary === "ai_vision_check_failed") capabilities.vision = false;
+      if (["ai_single_tool_call_required", "ai_invalid_tool_call"].includes(input.errorSummary)) capabilities.tool_calling = false;
+      const oldEvidence = o.capabilityEvidence?.connectionVersion === run.connectionVersion ? o.capabilityEvidence.capabilities : {};
+      this.store.put("offering", { ...o, verification: result,
+        ...(matched && evidence.successful && Object.keys(capabilities).length ? {
+          capabilityEvidence: { at: input.occurredAt, connectionVersion: run.connectionVersion,
+            capabilities: { ...oldEvidence, ...capabilities },
+            ...(Object.values(capabilities).includes(false)
+              ? { recheckAfter: new Date(Date.parse(input.occurredAt) + 7 * 86400000).toISOString() }
+              : o.capabilityEvidence?.recheckAfter ? { recheckAfter: o.capabilityEvidence.recheckAfter } : {}),
+          },
+        } : {}),
+        ...(run.poolId ? { poolFailure: input.result === "failure" || input.acceptance === "failed"
+          ? { at: input.occurredAt, connectionVersion: run.connectionVersion, reason: input.errorSummary || result.reason,
+            errorType: input.errorType || "upstream" }
+          : null } : {}),
+      });
       if (run.operationId)
         this.operations.update(run.operationId, {
           state: "succeeded",

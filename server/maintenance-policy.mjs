@@ -15,6 +15,8 @@ export const defaults = {
   closedHours: 24,
   keyRetryHours: 168,
   newModelsHours: 168,
+  archiveAfterDays: 14,
+  archiveReviewHours: 168,
   maxCandidates: 3,
   scanConcurrency: 5,
   unstableSuccesses: 3,
@@ -197,6 +199,8 @@ export function maintenanceStatus(
       ? c.catalogObservation
       : null;
   const reason =
+    Object.values(c.healthWindows || {}).find((w) => w.count > 0 &&
+      w.connectionVersion === (c.connectionVersion || 1))?.detail ||
     (!issues.length ? c.runtimeIssue?.reason : null) ||
     c.availability ||
     c.callIssue?.reason ||
@@ -247,7 +251,9 @@ export function maintenanceStatus(
     );
   if (!waitingFor && accountBlocked) waitingFor = "等待账号条件变化";
   if (!waitingFor && balanceWaiting) waitingFor = "等待确认额度补充";
-  const checkHours = issues.includes("invalid") ? p.keyRetryHours : hours;
+  const checkHours = c.autoArchive
+    ? Math.max(hours, p.archiveReviewHours)
+    : issues.includes("invalid") ? p.keyRetryHours : hours;
   let due = Math.max(
     now,
     Date.parse(lastCheckAt || "1970-01-01") + checkHours * 3600000,

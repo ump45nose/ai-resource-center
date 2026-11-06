@@ -56,22 +56,14 @@ export function archiveOf(c, site) {
     .filter(Boolean)
     .join(" ");
   if (
-    (site?.websiteObservation
-      ? site.websiteObservation.status === "unreachable" ||
-        site.websiteObservation.httpStatus >= 500
-      : site?.siteDown) ||
+    (!site?.websiteObservation && site?.siteDown) ||
     (c.management?.state === "closed" && !c.availability) ||
     /网站打不开|网站关闭|关站/.test(reason)
   )
     issues.add("website");
   if (/无余额|余额耗尽|没钱|无签到/.test(reason)) issues.add("balance");
   if (
-    /网站或key失效|网站或 key 失效|key.*(失效|缺失|丢失)|已封|封禁|未注册/.test(
-      reason,
-    ) ||
-    ["invalid", "authentication_failed", "missing_key"].includes(
-      c.credentialState,
-    )
+    /网站或key失效|网站或 key 失效|key.*(失效|缺失|丢失)|已封|封禁|未注册/.test(reason)
   )
     issues.add("invalid");
   if (/不稳定/.test(reason)) issues.add("unstable");

@@ -13,6 +13,7 @@ import { Problem, publicValue } from "./errors.mjs";
 import { paginate, policies } from "./resources.mjs";
 import { listCheckins } from "./checkins.mjs";
 import { rpEditSchema } from "./rp-sync.mjs";
+import { poolSchema, patchSchema, validatePool, poolCandidates, normalizeBinding } from "./channel-pools.mjs";
 
 const text = z.string().min(1),
   url = z
@@ -130,6 +131,8 @@ const policyFields = {
   closedHours: z.number().min(1),
   keyRetryHours: z.number().min(1),
   newModelsHours: z.number().min(1),
+  archiveAfterDays: z.number().int().min(1).max(365),
+  archiveReviewHours: z.number().int().min(24).max(8760),
   scanConcurrency: z.number().int().min(1).max(5),
   unstableSuccesses: z.number().int().min(2).max(10),
   maxCandidates: z.number().int().min(1).max(20),
@@ -989,6 +992,29 @@ export function capabilities({
     true,
   );
   add(
+    "list_channel_pools", "GET", "/cron/pools", "cron 可绑定的渠道池", listing,
+    a => paginate(store.list("channelPool"), a),
+  );
+  add(
+    "create_channel_pool", "POST", "/cron/pools", "创建按优先级选择模型的渠道池",
+    { data: poolSchema }, ({ data }) => store.put("channelPool", {
+      id: randomUUID(), ...validatePool(store, data),
+    }), true,
+  );
+  add(
+    "update_channel_pool", "PATCH", "/cron/pools/:id", "修改渠道池范围、优先级和候选校验策略",
+    { id: text, version, changes: patchSchema(poolSchema) }, ({ id, version, changes }) => {
+      const next = { ...store.require("channelPool", id), ...changes };
+      validatePool(store, next);
+      return store.update("channelPool", id, version, changes);
+    }, true,
+  );
+  add(
+    "channel_pool_candidates", "GET", "/cron/pools/:id/candidates", "预览指定任务的渠道池候选及优先级，不发起调用",
+    { id: text, source: text, taskId: text, ...listing }, ({ id, source, taskId, ...page }) =>
+      paginate(poolCandidates(store, store.require("channelPool", id), evaluations.task({ source, id: taskId })), page),
+  );
+  add(
     "list_bindings",
     "GET",
     "/cron/bindings",
@@ -1007,8 +1033,9 @@ export function capabilities({
   const binding = z
     .object({
       taskRef,
-      channelId: text,
-      modelId: text,
+      poolId: text.nullable().optional(),
+      channelId: text.optional(),
+      modelId: text.optional(),
       enabled: z.boolean().default(true),
       unavailable: z.enum(["original", "skip"]).default("original"),
       capabilityClass: z
@@ -1024,7 +1051,9 @@ export function capabilities({
     "/cron/bindings",
     "绑定已有任务，不运行或恢复任务",
     { data: binding },
-    ({ data }) => {
+    ({ data: raw }) => {
+      if (raw.poolId && (raw.channelId || raw.modelId)) throw new Problem(400, "渠道池绑定不固定渠道或模型");
+      const data = normalizeBinding(store, raw, { creating: true });
       const task = evaluations.task(data.taskRef);
       if (
         data.enabled &&
@@ -1033,22 +1062,29 @@ export function capabilities({
         throw new Problem(409, "任务尚未适配或原任务暂停，请先保存为停用绑定");
       if (
         data.enabled &&
+        data.validationOnly &&
+        task.supportsPreview === false
+      )
+        throw new Problem(409, "该任务不支持额外预览，请选择正常定时运行");
+      if (
+        data.enabled &&
         !data.validationOnly &&
         task.supportsScheduledRunConfig === false
       )
         throw new Problem(409, "该任务目前仅支持验证预览，不能绑定正式运行");
-      evaluations.offering(data.channelId, data.modelId);
-      const blocked = taskBlock(store.require("channel", data.channelId), task);
-      if (blocked) throw new Problem(409, blocked);
+      if (!data.poolId) {
+        evaluations.offering(data.channelId, data.modelId);
+        const blocked = taskBlock(store.require("channel", data.channelId), task);
+        if (blocked) throw new Problem(409, blocked);
+      }
       const existing = store
         .list("binding")
         .find(
           (b) =>
-            b.channelId === data.channelId &&
-            b.modelId === data.modelId &&
             b.taskRef.source === data.taskRef.source &&
             b.taskRef.id === data.taskRef.id &&
-            !!b.validationOnly === data.validationOnly,
+            !!b.validationOnly === data.validationOnly &&
+            (data.poolId ? true : !b.poolId && b.channelId === data.channelId && b.modelId === data.modelId),
         );
       return existing
         ? store.update("binding", existing.id, existing.version, data)
@@ -1061,9 +1097,10 @@ export function capabilities({
     "PATCH",
     "/cron/bindings/:id",
     "修改任务资源绑定，保留原计划",
-    { id: text, version, changes: binding.partial() },
+    { id: text, version, changes: patchSchema(binding) },
     ({ id, version, changes }) => {
-      const next = { ...store.require("binding", id), ...changes };
+      if (changes.poolId && (changes.channelId || changes.modelId)) throw new Problem(400, "渠道池绑定不固定渠道或模型");
+      const next = normalizeBinding(store, { ...store.require("binding", id), ...changes });
       const task = evaluations.task(next.taskRef);
       if (
         next.enabled &&
@@ -1072,14 +1109,22 @@ export function capabilities({
         throw new Problem(409, "任务尚未适配或原任务暂停");
       if (
         next.enabled &&
+        next.validationOnly &&
+        task.supportsPreview === false
+      )
+        throw new Problem(409, "该任务不支持额外预览");
+      if (
+        next.enabled &&
         !next.validationOnly &&
         task.supportsScheduledRunConfig === false
       )
         throw new Problem(409, "该任务目前仅支持验证预览");
-      const blocked = taskBlock(store.require("channel", next.channelId), task);
-      if (blocked) throw new Problem(409, blocked);
-      evaluations.offering(next.channelId, next.modelId);
-      return store.update("binding", id, version, changes);
+      if (!next.poolId) {
+        const blocked = taskBlock(store.require("channel", next.channelId), task);
+        if (blocked) throw new Problem(409, blocked);
+        evaluations.offering(next.channelId, next.modelId);
+      }
+      return store.update("binding", id, version, next);
     },
     true,
   );

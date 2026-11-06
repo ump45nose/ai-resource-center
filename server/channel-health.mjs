@@ -1,11 +1,29 @@
 import { archiveLabels, archiveOf, tagsOf } from "./channel-rules.mjs";
 import { policies, reviewManaged } from "./maintenance-policy.mjs";
+import { observeFailure, observeSuccess, matureFailure } from "./failure-window.mjs";
 
 export function managedHealth(store, c) {
   return policies(store).enabled && reviewManaged(store, c);
 }
-export function archiveChannel(store, channelId, reason, evidence) {
+export function observeChannelSuccess(store, channelId, at) {
+  for (const scope of ["scan", "task", "calls"])
+    observeSuccess(store, "channel", channelId, scope, at);
   const c = store.require("channel", channelId);
+  if (c.maintenance?.failureChecks &&
+      Date.parse(at) >= Date.parse(c.maintenance.failureChecks.at))
+    store.put("channel", { ...c, maintenance: { ...c.maintenance, failureChecks: null } });
+}
+export function archiveChannel(store, channelId, reason, evidence) {
+  let c = store.require("channel", channelId);
+  if (!managedHealth(store, c)) return false;
+  const window = observeFailure(store, "channel", channelId, evidence.source, {
+    ...evidence, reason, detail: evidence.reason,
+    firstFailureAt: reason === "website" ? c.maintenance?.failureChecks?.firstAt : undefined,
+  });
+  if (!matureFailure(store, window)) return false;
+  reason = window.reason;
+  evidence = { ...evidence, id: window.evidenceId, at: window.at, reason: window.detail };
+  c = store.require("channel", channelId);
   if (!managedHealth(store, c) || (archiveOf(c).length && !c.autoArchive))
     return false;
   if (c.autoArchive?.evidenceId === evidence.id && c.archiveReason === reason)
@@ -27,6 +45,8 @@ export function archiveChannel(store, channelId, reason, evidence) {
       source: evidence.source,
       at: evidence.at,
       connectionVersion: c.connectionVersion || 1,
+      firstFailureAt: window.firstFailureAt,
+      lastFailureAt: window.at,
     },
   });
   return true;
@@ -58,28 +78,23 @@ export function observeScanHealth(store, scan) {
       issue = { reason: "invalid", note: "未保存可用于调用的 key，等待补充" };
     else if (
       catalog.status === "login_required" &&
-      !tagsOf(c).includes("client_restricted") &&
-      /invalid.*(key|token)|unauthorized|无效.*(令牌|密钥)|令牌.*(失效|不存在)|key.*(无效|失效)/i.test(
-        text,
-      )
+      !tagsOf(c).includes("client_restricted")
     )
       issue = { reason: "invalid", note: `调用凭据被拒绝：${text}` };
     else {
       const webDown =
-        website.status === "unreachable" || website.httpStatus >= 500;
+        website.status === "unreachable" || website.httpStatus >= 404;
       const apiDown =
         ["network_error", "timeout"].includes(catalog.status) ||
-        catalog.httpStatus >= 500;
+        catalog.httpStatus >= 404 ||
+        (catalog.status === "unsupported" && webDown);
       if (webDown && apiDown) {
         const old = c.maintenance?.failureChecks;
         const sameVersion =
           old?.connectionVersion === (c.connectionVersion || 1);
         const firstAt = sameVersion ? old.firstAt || old.at : scan.scannedAt;
-        const count =
-          sameVersion &&
-          Date.parse(scan.scannedAt) - Date.parse(firstAt) >= 5 * 60000
-            ? old.count + Number(old.at !== scan.scannedAt)
-            : 1;
+        const count = sameVersion
+          ? old.count + Number(old.at !== scan.scannedAt) : 1;
         store.put("channel", {
           ...c,
           maintenance: {
@@ -92,15 +107,13 @@ export function observeScanHealth(store, scan) {
             },
           },
         });
-        if (
-          (website.httpStatus === 530 && catalog.httpStatus === 530) ||
-          count >= 2
-        )
-          issue = {
+        issue = {
             reason: "website",
             note: `网站与 API 均不可访问（网站 ${website.httpStatus || "连接失败"}，API ${catalog.httpStatus || "连接失败"}）`,
           };
-      } else if (c.maintenance?.failureChecks && catalog.status === "ok")
+      } else if (apiDown)
+        issue = { reason: "call", note: `网站可访问，但 API 持续无响应（${catalog.message || catalog.status}）` };
+      else if (c.maintenance?.failureChecks && catalog.status === "ok")
         store.put("channel", {
           ...c,
           maintenance: { ...c.maintenance, failureChecks: null },
@@ -112,6 +125,8 @@ export function observeScanHealth(store, scan) {
           ...evidence,
           reason: issue.note,
         }) || changed;
+    else if (catalog.status === "ok")
+      observeSuccess(store, "channel", c.id, "scan", scan.scannedAt);
   }
   return changed;
 }
@@ -161,6 +176,7 @@ export function observeTaskHealth(store, offering, verification) {
     at: verification.at,
   };
   if (verification.result === "success" && verification.quality === "passed") {
+    observeChannelSuccess(store, c.id, verification.at);
     Object.assign(next, {
       taskFailures: 0,
       failedRounds: [],
@@ -247,6 +263,8 @@ export function reconcileCallHealth(store, channelIds) {
         "SELECT occurred_at,result,error_type FROM calls WHERE channel_id=? AND occurred_at>=? AND legacy_import=0 AND (origin IS NULL OR origin='live') ORDER BY occurred_at DESC,rowid DESC LIMIT 1",
       )
       .get(c.id, since);
+    if (latest?.result === "success")
+      observeChannelSuccess(store, c.id, latest.occurred_at);
     if (
       latest?.result === "failure" &&
       ["rate", "quota"].includes(latest.error_type) &&
@@ -333,7 +351,8 @@ export function reconcileCallHealth(store, channelIds) {
           .sort()
           .at(-1)}`,
         source: "calls",
-        at: new Date().toISOString(),
+        at: store.list("offering").filter((o) => o.channelId === c.id)
+          .map((o) => o.health?.at).filter(Boolean).sort().at(-1),
         reason: "已排除限流、额度、输入和取消错误",
       }) || changed;
   }

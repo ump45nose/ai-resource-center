@@ -192,6 +192,9 @@ export class Maintenance {
       policy: policies(this.store),
       pilot: this.store.setting("automationPilot"),
       budget: this.budget(),
+      archivedCheckins: this.store.list("account")
+        .filter((a) => !a.mergedInto && a.checkinArchive?.active)
+        .map((a) => ({ accountId: a.id, siteId: a.siteId, name: a.name, ...a.checkinArchive })),
       gatewayWrites: this.gateway.allowWrites,
       tasks: {
         total: this.store.list("task").length,
@@ -223,6 +226,7 @@ export class Maintenance {
       channels: rows,
       bindings: this.store.list("binding").map((b) => ({
         ...b,
+        poolName: b.poolId ? this.store.get("channelPool", b.poolId)?.name : null,
         taskName:
           this.store
             .list("task")

@@ -13,6 +13,9 @@ class ResourceCenter:
         self.config_path = Path(config_file)
         self.config = json.loads(self.config_path.read_text())
         self.outbox = Path(self.config.get("outbox", str(self.config_path.parent / "resource-center-outbox")))
+        self.outbox_mode = self.config.get("outboxFileMode", 0o600)
+        if self.outbox_mode not in {0o600, 0o660}:
+            raise ValueError("invalid receipt file mode")
 
     def request(self, path, payload, method="POST"):
         request = Request(self.config["url"].rstrip("/") + "/api/v2" + path,
@@ -25,16 +28,20 @@ class ResourceCenter:
     def publish(self, tasks):
         return self.request("/cron/tasks", {"tasks": tasks})
 
-    def prepare(self, task_id, run_id, binding_id=None, execution_mode="scheduled"):
+    def prepare(self, task_id, run_id, binding_id=None, execution_mode="scheduled", *, excluded_offerings=None, pool_run_id=None):
         """Returns one-run inference config to the caller; do not log its credentials."""
-        return self.request("/cron/runs/prepare", {"taskId": task_id, "runId": run_id, "executionMode": execution_mode, **({"bindingId": binding_id} if binding_id else {})})
+        return self.request("/cron/runs/prepare", {"taskId": task_id, "runId": run_id, "executionMode": execution_mode,
+            **({"bindingId": binding_id} if binding_id else {}),
+            **({"excludedOfferings": excluded_offerings} if excluded_offerings else {}),
+            **({"poolRunId": pool_run_id} if pool_run_id else {})})
 
     def result(self, result):
         """Persist receipt before upload. A failed upload never reruns business work."""
         self.outbox.mkdir(parents=True, exist_ok=True, mode=0o700)
         path = self.outbox / (quote(str(result["runId"]), safe="") + ".json")
         temp = path.with_suffix(".tmp")
-        with os.fdopen(os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as stream:
+        with os.fdopen(os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, self.outbox_mode), "w") as stream:
+            os.fchmod(stream.fileno(), self.outbox_mode)
             json.dump(result, stream)
         temp.replace(path)
         response = self.request("/ingest/task-results", result)
@@ -63,13 +70,16 @@ def publish_profile(client, profile):
     jobs = value["jobs"] if isinstance(value, dict) else value
     configured = set(client.config.get("adaptedTaskIds", []))
     previews = set(client.config.get("previewTaskIds", []))
+    requirements = client.config.get("taskRequirements", {})
     tasks = [{"id": str(job["id"]), "name": job.get("name") or str(job["id"]),
               "enabled": job.get("enabled", True), "schedule": job.get("schedule"),
-              "timezone": job.get("timezone") or "Asia/Shanghai",
+              "timezone": job.get("timezone") or client.config.get("timezone") or "Asia/Taipei",
               "supportsRunConfig": str(job["id"]) in configured | previews,
               "supportsResult": str(job["id"]) in configured | previews,
               "supportsPreview": str(job["id"]) in previews,
-              "supportsScheduledRunConfig": str(job["id"]) in configured}
+              "supportsScheduledRunConfig": str(job["id"]) in configured,
+              **({"requiredCapabilities": requirements[str(job["id"])]}
+                 if str(job["id"]) in requirements else {})}
              for job in jobs]
     tasks.extend(client.config.get("externalTasks", []))
     return client.publish(tasks)

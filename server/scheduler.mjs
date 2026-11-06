@@ -1,6 +1,7 @@
 import { hasBookmarkWork } from "./bookmark-imports.mjs";
 import { policies } from "./resources.mjs";
 import { reviewManaged } from "./maintenance-policy.mjs";
+import { reconcileCheckinArchives } from "./checkin-health.mjs";
 
 export class Scheduler {
   constructor(store, operations, scans, gateway, maintenance) {
@@ -72,6 +73,7 @@ export class Scheduler {
       }
     }
     if (!p.enabled) return;
+    reconcileCheckinArchives(this.store);
     const ids = [];
     for (const c of this.store.list("channel")) {
       if (!reviewManaged(this.store, c)) continue;
