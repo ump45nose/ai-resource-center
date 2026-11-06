@@ -43,6 +43,24 @@ export type Checkin = {
   reason?: string;
   reward?: string;
 };
+export type CheckinToday = {
+  state:
+    | "done"
+    | "not_needed"
+    | "action_required"
+    | "failed"
+    | "pending"
+    | "not_applicable";
+  label: string;
+  tone: Tone;
+  detail: string;
+  basis: "event" | "site_status" | "manual_mark" | "settings" | "none";
+  reason: string | null;
+  method: string | null;
+  confirmedAt: string | null;
+  businessDate: string;
+  timezone: string;
+};
 export type Account = {
   id: string;
   version: number;
@@ -71,6 +89,7 @@ export type Account = {
   };
   validUntil?: string;
   checkins: Checkin[];
+  checkinToday: CheckinToday;
   checkinAccountId?: string;
   checkinAccount?: Account;
   hubKeys?: {
@@ -546,99 +565,6 @@ export function hubCheckinUrl(
   return path ? new URL(path, site.websiteUrl).href : null;
 }
 
-export function hubCheckinStatus(account: Account, now = new Date()) {
-  const observation = account.sourceObservation;
-  const checkin = observation?.checkin;
-  const day = new Intl.DateTimeFormat("sv-SE", {
-    timeZone: account.benefit?.tz || "Asia/Shanghai",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-  const today = day.format(now);
-  const events = account.checkins
-    .filter((e) => e.source === "all-api-hub" && e.businessDate === today)
-    .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
-  const success = events.find((e) => ["成功", "已签到"].includes(e.result));
-  const statusAt = checkin?.statusObservedAt || observation?.observedAt;
-  const observedToday = statusAt && day.format(new Date(statusAt)) === today;
-  const checkedIn = Boolean(
-    success ||
-      checkin?.lastCheckInDate === today ||
-      (observedToday && checkin?.isCheckedInToday === true),
-  );
-  const automatic =
-    observation?.enabled !== false &&
-    checkin?.enabled === true &&
-    checkin.supportStatus !== "unsupported" &&
-    checkin.supported !== false;
-  const setting = automatic ? "自动签到已开启" : "无自动签到";
-  const latest = events[0];
-  const reasons: Record<string, string> = {
-    no_selected_method: "未配置签到方式",
-    status_unavailable: "签到状态读取失败",
-    checkin_unconfirmed: "执行未确认",
-    authentication_required: "签到站需登录",
-    identity_mismatch: "签到账号不一致",
-    manual_verification_required: "需要人工验证",
-    method_disabled: "站点暂不允许签到",
-  };
-  let label: string;
-  let tone: Tone;
-  let detail: string;
-  if (checkedIn) {
-    label = success?.method === "自动签到" ? "已自动签到" : "今日已签到";
-    tone = "green";
-    detail = automatic ? "今日签到完成" : setting;
-  } else if (
-    observedToday &&
-    checkin?.ineligibleReason === "balance_threshold"
-  ) {
-    label = "未达签到门槛";
-    tone = "neutral";
-    detail = account.benefit?.threshold
-      ? String(account.benefit.threshold)
-      : "余额充足，暂不符合签到条件";
-  } else if (latest?.reason && reasons[latest.reason]) {
-    label = reasons[latest.reason];
-    tone = [
-      "authentication_required",
-      "identity_mismatch",
-      "status_unavailable",
-    ].includes(latest.reason)
-      ? "red"
-      : "amber";
-    detail =
-      latest.reason === "checkin_unconfirmed"
-        ? "尚未确认今日签到成功"
-        : setting;
-  } else if (checkin?.configured === false && automatic) {
-    label = "未配置签到方式";
-    tone = "amber";
-    detail = setting;
-  } else if (
-    events[0] &&
-    ["失败", "需登录", "需人工操作"].includes(events[0].result)
-  ) {
-    label = events[0].result === "失败" ? "签到失败" : events[0].result;
-    tone = "red";
-    detail = setting;
-  } else if (!automatic) {
-    label = "无自动签到";
-    tone = "neutral";
-    detail = observation?.enabled === false ? "插件账号已停用" : "未签到";
-  } else {
-    label =
-      checkin?.supportStatus === "unknown"
-        ? "签到支持待确认"
-        : observedToday && checkin?.isCheckedInToday === false
-          ? "未签到"
-          : "签到待确认";
-    tone = "amber";
-    detail = setting;
-  }
-  return { label, tone, detail, checkedIn, reason: events[0]?.reason };
-}
 export const searchSites = <T extends Site>(sites: T[], query: string) =>
   sites.filter((s) =>
     [

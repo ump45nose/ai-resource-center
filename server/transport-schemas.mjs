@@ -112,10 +112,26 @@ const channel = identified.extend({
   recovery: z.object({ pending: z.boolean(), state: z.string() }).loose(),
   credentialStatus: z.string(),
 });
+// The same object as overview `daily.accounts[].checkinToday`.
+const checkinToday = z.object({
+  state: z.enum(["done", "not_needed", "action_required", "failed", "pending", "not_applicable"]),
+  label: z.string(),
+  tone: z.enum(["green", "neutral", "amber", "red"]),
+  detail: z.string(),
+  basis: z.enum(["event", "site_status", "manual_mark", "settings", "none"]),
+  reason: z.string().nullable(),
+  method: z.string().nullable(),
+  confirmedAt: z.string().nullable(),
+  businessDate: z.string(),
+  timezone: z.string(),
+});
 const site = identified.extend({
   name: z.string(),
   websiteUrl: z.string(),
-  accounts: z.array(identified),
+  accounts: z.array(identified.extend({
+    checkinToday,
+    checkinAccount: identified.extend({ checkinToday }).optional(),
+  })),
   channels: z.array(channel),
 });
 const operation = identified.extend({

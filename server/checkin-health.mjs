@@ -10,19 +10,25 @@ export const confirmedCheckin = (event) =>
   ["成功", "已签到"].includes(event.result) ||
   (event.result === "未执行" && event.reason === "already_checked_today");
 
+// "skipped": the source left the account out of execution; "not_needed": the
+// site offered nothing to claim today. Neither is a due check-in or a failure.
+const notDue = {
+  account_disabled: "skipped",
+  auto_checkin_disabled: "skipped",
+  detection_disabled: "skipped",
+  center_archived: "skipped",
+  no_provider: "skipped",
+  no_selected_method: "skipped",
+  balance_threshold: "not_needed",
+  method_disabled: "not_needed",
+  no_available_method: "not_needed",
+};
+export const checkinNotDue = (event) =>
+  notDue[event.reason] || (event.result === "无需签到" ? "not_needed" : null);
+
 function failureReason(event) {
-  if (
-    [
-      "account_disabled",
-      "auto_checkin_disabled",
-      "center_archived",
-      "no_provider",
-      "no_selected_method",
-      "balance_threshold",
-      "cancelled",
-    ].includes(event.reason)
-  )
-    return null;
+  // An interrupted attempt is still due, but it is not evidence of failure.
+  if (checkinNotDue(event) || event.reason === "cancelled") return null;
   if (
     event.result === "需登录" ||
     ["authentication_required", "permission_denied"].includes(event.reason)
