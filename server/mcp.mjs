@@ -5,7 +5,9 @@ import { authorize } from "./auth.mjs";
 import { publicValue, errorMessage } from "./errors.mjs";
 import { outputs } from "./transport-schemas.mjs";
 
-export async function mcpRequest(capabilities, auth, request) {
+const transportHeaders = ["content-type", "accept", "mcp-protocol-version"];
+
+export async function mcpRequest(capabilities, auth, req) {
   authorize(auth);
   const server = new McpServer({
     name: "ai-resource-center",
@@ -59,7 +61,17 @@ export async function mcpRequest(capabilities, auth, request) {
   });
   await server.connect(transport);
   try {
-    return await transport.handleRequest(request);
+    return await transport.handleRequest(
+      new Request(`http://${req.headers.host}/mcp`, {
+        method: "POST",
+        headers: Object.fromEntries(
+          transportHeaders
+            .filter((name) => req.headers[name])
+            .map((name) => [name, req.headers[name]]),
+        ),
+        body: JSON.stringify(req.body),
+      }),
+    );
   } finally {
     await transport.close();
     await server.close();

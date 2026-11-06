@@ -12,6 +12,7 @@ import { headers as normalizeHeaders } from "./domain.mjs";
 import { Problem, publicValue } from "./errors.mjs";
 import { paginate, policies } from "./resources.mjs";
 import { listCheckins } from "./checkins.mjs";
+import { history } from "./history.mjs";
 import { rpEditSchema } from "./rp-sync.mjs";
 
 const text = z.string().min(1),
@@ -123,8 +124,6 @@ const channelFields = {
 };
 const policyFields = {
   enabled: z.boolean(),
-  syncMinutes: z.number().int().min(1),
-  callsMinutes: z.number().int().min(1),
   normalHours: z.number().min(1),
   maintenanceHours: z.number().min(1),
   closedHours: z.number().min(1),
@@ -203,7 +202,8 @@ export function capabilities({
       ...options,
     });
   add("list_rp_connections", "GET", "/rp/connections", "酒馆连接与同步状态", {channelId: text.optional()},
-    (a,auth) => { const result=rp.list(auth); return {...result,items:result.items.filter(b=>!a.channelId||b.channelId===a.channelId)}; });
+    (a,auth) => { const result=rp.list(auth); return {...result,items:result.items.filter(b=>!a.channelId||b.channelId===a.channelId)}; },
+    false, { roles: ["rp", "connector"] });
   add("update_rp_connection", "PATCH", "/rp/connections/:id", "修改酒馆连接，独立保存选定模型", {id:text,...rpEditSchema.shape},
     (a,auth)=>rp.edit(auth,a.id,a),true);
   add(
@@ -336,61 +336,7 @@ export function capabilities({
       to: z.iso.datetime().optional(),
       kind: z.enum(["calls", "changes", "operations"]).optional(),
     },
-    (a) => {
-      const ids = a.channelId
-        ? [a.channelId]
-        : a.siteId
-          ? store
-              .list("channel")
-              .filter((c) => c.siteId === a.siteId)
-              .map((c) => c.id)
-          : null;
-      if (a.kind === "operations")
-        return paginate(
-          store
-            .list("operation")
-            .filter(
-              (o) =>
-                !ids ||
-                ids.includes(o.input.channelId) ||
-                o.input.channelIds?.some((id) => ids.includes(id)),
-            ),
-          a,
-        );
-      if (a.kind === "changes")
-        return paginate(
-          store.db
-            .prepare("SELECT * FROM actions ORDER BY occurred_at DESC")
-            .all()
-            .filter((r) => !ids || ids.includes(r.target))
-            .map((r) => ({ ...r, data: JSON.parse(r.data) })),
-          a,
-        );
-      const clauses = [],
-        args = [];
-      if (ids) {
-        clauses.push(`channel_id IN (${ids.map(() => "?") || "NULL"})`);
-        args.push(...ids);
-      }
-      for (const [field, operator, value] of [
-        ["model", "=", a.modelId],
-        ["occurred_at", ">=", a.from],
-        ["occurred_at", "<=", a.to],
-      ])
-        if (value) {
-          clauses.push(`${field}${operator}?`);
-          args.push(value);
-        }
-      const rows = store.db
-        .prepare(
-          `SELECT * FROM calls ${clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""} ORDER BY occurred_at DESC`,
-        )
-        .all(...args);
-      return {
-        ...paginate(rows, a),
-        coverage: "按来源保存；不同来源未确认关联的请求不能直接相加",
-      };
-    },
+    (a) => history(store, a),
   );
   add(
     "create_site",
@@ -723,7 +669,13 @@ export function capabilities({
     { id: text, version, key: text },
     ({ id, version, key }) => {
       const s = sources.get(id);
-      if ((s.version || 1) !== version) throw new Problem(409, "来源已更新");
+      if ((s.version || 1) !== version)
+        throw new Problem(
+          409,
+          "来源已更新",
+          { currentVersion: s.version || 1 },
+          "version_conflict",
+        );
       sources.update(id, {
         credentialId: store.secret(key, s.credentialId),
         version: version + 1,
@@ -857,18 +809,18 @@ export function capabilities({
     },
     (a) => {
       evaluations.offering(a.channelId, a.modelId);
-      const c = store.require("channel", a.channelId);
+      const bound =
+        !a.taskRef &&
+        maintenance.taskFor(store.require("channel", a.channelId), a.modelId);
       return operations.start("evaluate", {
         ...a,
-        ...(a.taskRef || !maintenance.taskFor(c, a.modelId)
-          ? {}
-          : {
-              taskRef: maintenance.taskFor(c, a.modelId).taskRef,
-              bindingId: maintenance.taskFor(c, a.modelId).id,
-              executionMode: maintenance.taskFor(c, a.modelId).validationOnly
-                ? "preview"
-                : "scheduled",
-            }),
+        ...(bound
+          ? {
+              taskRef: bound.taskRef,
+              bindingId: bound.id,
+              executionMode: bound.validationOnly ? "preview" : "scheduled",
+            }
+          : {}),
       });
     },
     true,
@@ -934,20 +886,43 @@ export function capabilities({
     listing,
     (a) => paginate(store.list("run").reverse(), a),
   );
+  const bindingFields = {
+    taskRef,
+    channelId: text,
+    modelId: text,
+    enabled: z.boolean(),
+    unavailable: z.enum(["original", "skip"]),
+    capabilityClass: z.enum(["strong", "execution", "unclassified"]),
+    discoverNewModels: z.boolean(),
+    validationOnly: z.boolean(),
+  };
   const binding = z
     .object({
-      taskRef,
-      channelId: text,
-      modelId: text,
-      enabled: z.boolean().default(true),
-      unavailable: z.enum(["original", "skip"]).default("original"),
-      capabilityClass: z
-        .enum(["strong", "execution", "unclassified"])
-        .default("unclassified"),
-      discoverNewModels: z.boolean().default(false),
-      validationOnly: z.boolean().default(false),
+      ...bindingFields,
+      enabled: bindingFields.enabled.default(true),
+      unavailable: bindingFields.unavailable.default("original"),
+      capabilityClass: bindingFields.capabilityClass.default("unclassified"),
+      discoverNewModels: bindingFields.discoverNewModels.default(false),
+      validationOnly: bindingFields.validationOnly.default(false),
     })
     .strict();
+  const checkBinding = (b) => {
+    const task = evaluations.task(b.taskRef);
+    if (
+      b.enabled &&
+      (!task.enabled || !task.supportsRunConfig || !task.supportsResult)
+    )
+      throw new Problem(409, "任务尚未适配或原任务暂停，请先保存为停用绑定");
+    if (
+      b.enabled &&
+      !b.validationOnly &&
+      task.supportsScheduledRunConfig === false
+    )
+      throw new Problem(409, "该任务目前仅支持验证预览，不能绑定正式运行");
+    const blocked = taskBlock(store.require("channel", b.channelId), task);
+    if (blocked) throw new Problem(409, blocked);
+    evaluations.offering(b.channelId, b.modelId);
+  };
   add(
     "create_binding",
     "POST",
@@ -955,21 +930,7 @@ export function capabilities({
     "绑定已有任务，不运行或恢复任务",
     { data: binding },
     ({ data }) => {
-      const task = evaluations.task(data.taskRef);
-      if (
-        data.enabled &&
-        (!task.enabled || !task.supportsRunConfig || !task.supportsResult)
-      )
-        throw new Problem(409, "任务尚未适配或原任务暂停，请先保存为停用绑定");
-      if (
-        data.enabled &&
-        !data.validationOnly &&
-        task.supportsScheduledRunConfig === false
-      )
-        throw new Problem(409, "该任务目前仅支持验证预览，不能绑定正式运行");
-      evaluations.offering(data.channelId, data.modelId);
-      const blocked = taskBlock(store.require("channel", data.channelId), task);
-      if (blocked) throw new Problem(409, blocked);
+      checkBinding(data);
       const existing = store
         .list("binding")
         .find(
@@ -991,24 +952,9 @@ export function capabilities({
     "PATCH",
     "/cron/bindings/:id",
     "修改任务资源绑定，保留原计划",
-    { id: text, version, changes: binding.partial() },
+    { id: text, version, changes: z.object(bindingFields).partial().strict() },
     ({ id, version, changes }) => {
-      const next = { ...store.require("binding", id), ...changes };
-      const task = evaluations.task(next.taskRef);
-      if (
-        next.enabled &&
-        (!task.enabled || !task.supportsRunConfig || !task.supportsResult)
-      )
-        throw new Problem(409, "任务尚未适配或原任务暂停");
-      if (
-        next.enabled &&
-        !next.validationOnly &&
-        task.supportsScheduledRunConfig === false
-      )
-        throw new Problem(409, "该任务目前仅支持验证预览");
-      const blocked = taskBlock(store.require("channel", next.channelId), task);
-      if (blocked) throw new Problem(409, blocked);
-      evaluations.offering(next.channelId, next.modelId);
+      checkBinding({ ...store.require("binding", id), ...changes });
       return store.update("binding", id, version, changes);
     },
     true,

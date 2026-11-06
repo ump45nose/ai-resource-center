@@ -34,6 +34,12 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: OpenAPI is up to date
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          npm run openapi
+          git diff --exit-code docs/openapi.json
+
       - name: Typecheck and build
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: npm run build

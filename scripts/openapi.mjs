@@ -1,7 +1,8 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createApp, openapi } from "../server/app.mjs";
+import { createApp } from "../server/app.mjs";
+import { openapi } from "../server/openapi.mjs";
 
 const dir = mkdtempSync(join(tmpdir(), "arc-openapi-"));
 try {

@@ -17,7 +17,6 @@ import { Scheduler } from "./scheduler.mjs";
 import { capabilities } from "./capabilities.mjs";
 import {
   bootstrap,
-  authenticate,
   authorize,
   issueToken,
   login,
@@ -28,6 +27,8 @@ import { ingestAccounts } from "./ingest.mjs";
 import { checkinExecutionPolicy } from "./checkin-health.mjs";
 import { ingestHubInventory, ingestHubCredentials } from "./hub-ingest.mjs";
 import { mcpRequest } from "./mcp.mjs";
+import { openapi } from "./openapi.mjs";
+import { registerHttpSecurity } from "./http-security.mjs";
 import { registerLegacy } from "./legacy.mjs";
 import { RpSync, registerRp } from "./rp-sync.mjs";
 import {
@@ -35,115 +36,9 @@ import {
   prepareSchema,
   taskResultSchema,
   ingestSchema,
-  outputs,
-  transportRoutes,
   connectorReceiptSchema,
   accessSchema,
 } from "./transport-schemas.mjs";
-
-const jsonSchema = (s) =>
-  z.toJSONSchema(s, { io: "input", unrepresentable: "any" });
-export function openapi(caps) {
-  const paths = {};
-  for (const c of caps) {
-    const path = `/api/v2${c.path.replace(/:([^/]+)/g, "{$1}")}`;
-    const params = [...c.path.matchAll(/:([^/]+)/g)].map((m) => m[1]);
-    const bodyShape = Object.fromEntries(
-      Object.entries(c.schema.shape).filter(([key]) => !params.includes(key)),
-    );
-    const parameters = params.map((name) => ({
-      name,
-      in: "path",
-      required: true,
-      schema: jsonSchema(c.schema.shape[name]),
-    }));
-    if (c.method === "GET")
-      for (const [name, schema] of Object.entries(bodyShape))
-        parameters.push({
-          name,
-          in: "query",
-          required: !schema.isOptional(),
-          schema: jsonSchema(schema),
-        });
-    const outputSchema =
-      outputs[c.name] || (c.accepted ? outputs.resource_get_operation : null);
-    const output = {
-      description: c.description,
-      content: {
-        "application/json": {
-          schema: outputSchema
-            ? jsonSchema(outputSchema)
-            : { type: "object", additionalProperties: true },
-        },
-      },
-    };
-    paths[path] ||= {};
-    paths[path][c.method.toLowerCase()] = {
-      operationId: c.name,
-      summary: c.description,
-      security: [{ bearerAuth: [] }, { session: [] }],
-      parameters,
-      ...(c.method !== "GET"
-        ? {
-            requestBody: {
-              required: true,
-              content: {
-                "application/json": {
-                  schema: jsonSchema(z.object(bodyShape).strict()),
-                },
-              },
-            },
-          }
-        : {}),
-      responses: {
-        [c.accepted ? "202" : "200"]: output,
-        400: { description: "参数错误" },
-        401: { description: "未登录" },
-        403: { description: "权限不足" },
-        409: { description: "版本或操作范围冲突" },
-      },
-    };
-  }
-  for (const [method, path, schema, description] of transportRoutes)
-    paths[path] = {
-      [method.toLowerCase()]: {
-        operationId: path.replace(/[^a-z0-9]/gi, "_").replace(/^_/, ""),
-        summary: description,
-        ...(method === "GET"
-          ? {}
-          : {
-              requestBody: {
-                required: true,
-                content: { "application/json": { schema: jsonSchema(schema) } },
-              },
-            }),
-        security: path.endsWith("/session") ? [] : [{ bearerAuth: [] }],
-        responses: {
-          200: {
-            description: "操作结果",
-            content: {
-              "application/json": {
-                schema: { type: "object", additionalProperties: true },
-              },
-            },
-          },
-          401: { description: "未授权" },
-          403: { description: "来源不匹配" },
-        },
-      },
-    };
-  return {
-    openapi: "3.1.1",
-    info: { title: "公益资源管理 API", version: "2.0.0" },
-    paths,
-    components: {
-      securitySchemes: {
-        bearerAuth: { type: "http", scheme: "bearer" },
-        session: { type: "apiKey", in: "cookie", name: "arc_session" },
-      },
-    },
-  };
-}
 
 export async function createApp({
   dir,
@@ -248,53 +143,7 @@ export async function createApp({
     if (status >= 500 && !error.statusCode)
       process.stderr.write(`${error.stack}\n`);
   });
-  app.addHook("onRequest", async (req, reply) => {
-    const origin = req.headers.origin;
-    if (
-      origin &&
-      (origin.startsWith("chrome-extension://") ||
-        origin.startsWith("moz-extension://") ||
-        (store.setting("sources") || []).some(
-          (s) => s.kind === "sillytavern" && new URL(s.url).origin === origin,
-        ))
-    )
-      reply
-        .header("Access-Control-Allow-Origin", origin)
-        .header("Vary", "Origin")
-        .header(
-          "Access-Control-Allow-Headers",
-          "Authorization,Content-Type,MCP-Protocol-Version",
-        )
-        .header(
-          "Access-Control-Allow-Methods",
-          "GET,POST,PATCH,PUT,DELETE,OPTIONS",
-        );
-    if (req.method === "OPTIONS") return reply.code(204).send();
-  });
-  app.addHook("preHandler", async (req) => {
-    if (
-      ["/api/health", "/openapi.json"].includes(req.url.split("?")[0]) ||
-      ((req.url === "/api/v1/session" || req.url === "/api/v2/session") &&
-        req.method === "POST")
-    )
-      return;
-    if (!req.url.startsWith("/api/") && !req.url.startsWith("/mcp")) return;
-    const bearer = req.headers.authorization?.replace(/^Bearer /, "");
-    req.auth = authenticate(store, bearer || req.cookies.arc_session);
-    if (
-      req.headers.origin &&
-      !bearer &&
-      !["GET", "HEAD"].includes(req.method) &&
-      new URL(req.headers.origin).host !== req.headers.host
-    )
-      throw new Problem(403, "管理会话来源不一致");
-    if (
-      req.url === "/mcp" &&
-      req.headers.origin &&
-      new URL(req.headers.origin).host !== req.headers.host
-    )
-      throw new Problem(403, "MCP 请求来源不一致");
-  });
+  registerHttpSecurity(app, store);
   registerWeb(app);
   app.get("/api/v2/session", (req) => {
     authorize(req.auth);
@@ -334,7 +183,7 @@ export async function createApp({
       method: cap.method,
       url: `/api/v2${cap.path}`,
       handler: async (req, reply) => {
-        if (!(cap.name === "resource_list_rp_connections" && ["rp", "connector"].includes(req.auth.role))) authorize(req.auth, cap.write);
+        if (!cap.roles?.includes(req.auth.role)) authorize(req.auth, cap.write);
         const input = cap.schema.parse({
           ...req.query,
           ...req.body,
@@ -390,15 +239,7 @@ export async function createApp({
     req.auth.scope?.rpInstanceId ? context.rp.receipt(req.auth, connectorReceiptSchema.parse(req.body)) : distribution.acknowledge(req.auth, connectorReceiptSchema.parse(req.body)),
   );
   app.post("/mcp", async (req, reply) => {
-    const response = await mcpRequest(
-      caps,
-      req.auth,
-      new Request(`http://${req.headers.host}/mcp`, {
-        method: "POST",
-        headers: req.headers,
-        body: JSON.stringify(req.body),
-      }),
-    );
+    const response = await mcpRequest(caps, req.auth, req);
     reply.code(response.status);
     response.headers.forEach((v, k) => reply.header(k, v));
     return reply.send(await response.text());
