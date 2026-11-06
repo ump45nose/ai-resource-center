@@ -98,10 +98,18 @@ export class Operations {
     this.running = true;
     try {
       while (!this.closed) {
-        const op = this.store
-          .list("operation")
-          .find((o) => o.state === "queued");
-        if (!op) break;
+        // Finished operations are kept forever; look up only the oldest queued one.
+        const row = this.store
+          .sql(
+            "SELECT id,data,version FROM entities WHERE kind='operation' AND json_extract(data,'$.state')='queued' ORDER BY rowid LIMIT 1",
+          )
+          .get();
+        if (!row) break;
+        const op = {
+          ...JSON.parse(row.data),
+          id: row.id,
+          version: row.version,
+        };
         this.update(op.id, {
           state: "running",
           startedAt: new Date().toISOString(),

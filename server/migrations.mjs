@@ -10,6 +10,16 @@ import {
   usageOf,
 } from "./channel-rules.mjs";
 
+// Queries repeat these expressions verbatim; SQLite only uses an expression index on an exact match.
+export function migrateIndexes(store) {
+  store.db.exec(`
+    CREATE INDEX IF NOT EXISTS events_date ON events(business_date);
+    CREATE INDEX IF NOT EXISTS calls_channel_result ON calls(channel_id,result,occurred_at);
+    CREATE INDEX IF NOT EXISTS entities_delivery ON entities(json_extract(data,'$.target'),json_extract(data,'$.revision')) WHERE kind='delivery';
+    CREATE INDEX IF NOT EXISTS entities_operation_state ON entities(json_extract(data,'$.state')) WHERE kind='operation';
+  `);
+}
+
 export const rpRemovalKey = "migration:rp-out-of-center-v1";
 const removalFields = {
   channel: ["enabled", "availability", "management", "recoveryPolicy"],

@@ -1,6 +1,7 @@
 import Fastify from "fastify";
 import { Distribution } from "./distribution.mjs";
 import {
+  migrateIndexes,
   migrateChannels,
   migrateUsage,
   migrateRpRemoval,
@@ -52,6 +53,7 @@ export async function createApp({
 } = {}) {
   const store = new Store(dir);
   bootstrap(store, dir);
+  migrateIndexes(store);
   migrateChannels(store);
   migrateUsage(store);
   migrateHubKeys(store);

@@ -317,6 +317,75 @@ test("adopting an external New API edit updates the channel and link together", 
   assert.equal(f.store.require("delivery", job.id).state, "superseded");
 });
 
+test("reconcile settles each channel's jobs on its own when their histories interleave", async (t) => {
+  const f = await fixture(t);
+  const d = f.app.services.distribution;
+  newApiSource(f);
+  const channel = (name, models) => {
+    const c = f.resources.channel({
+      siteId: f.site.id,
+      accountId: f.account.id,
+      name,
+      baseUrl: "https://upstream.test/v1",
+      models,
+      enabled: true,
+    });
+    return f.store.put("channel", {
+      ...c,
+      credentialId: f.store.secret(`sk-${name}`),
+    });
+  };
+  const a = f.channel,
+    b = channel("B", ["model-B"]),
+    c = channel("C", ["model-C"]);
+  await adopt(f, "newapi");
+  const jobs = (subject) =>
+    f.store.list("delivery").filter((j) => j.subject === subject);
+  const [pendingA] = jobs(a.id),
+    [pendingB] = jobs(b.id),
+    [pendingC] = jobs(c.id);
+  const add = (subject, state, revision = "old") =>
+    f.store.put("delivery", {
+      target: "newapi",
+      subject,
+      revision,
+      payload: {},
+      state,
+      createdAt: new Date().toISOString(),
+      attempts: 1,
+    });
+  const conflictB = add(b.id, "conflict"),
+    failedA = add(a.id, "failed"),
+    appliedA = add(a.id, "applied"),
+    latestB = add(b.id, "pending", pendingB.revision);
+  f.store.put("channel", {
+    ...f.store.require("channel", a.id),
+    models: ["model-A", "model-Z"],
+  });
+  f.store.put("channel", {
+    ...f.store.require("channel", c.id),
+    sourceOnly: true,
+  });
+  d.reconcile("newapi");
+  const now = (j) => f.store.require("delivery", j.id);
+  // A changed: its open jobs are replaced by one job for the new revision.
+  assert.equal(now(pendingA).state, "superseded");
+  assert.equal(now(failedA).state, "superseded");
+  assert.equal(now(appliedA).state, "applied");
+  const openA = jobs(a.id).filter((j) => j.state === "pending");
+  assert.equal(openA.length, 1);
+  assert.notEqual(openA[0].revision, pendingA.revision);
+  // B is current: its earlier conflict yields to the latest job and nothing is queued.
+  assert.equal(now(conflictB).state, "superseded");
+  assert.equal(now(conflictB).supersededBy, latestB.id);
+  assert.equal(now(latestB).state, "pending");
+  assert.equal(now(pendingB).state, "pending");
+  assert.equal(jobs(b.id).length, 3);
+  // C left distribution: its open job is closed and kept as history.
+  assert.equal(now(pendingC).state, "superseded");
+  assert.match(now(pendingC).reason, /不再需要分发/);
+});
+
 test("gateway stages evaluation channels with the protocol's New API type", async (t) => {
   const f = await fixture(t);
   newApiSource(f);

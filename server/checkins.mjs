@@ -113,9 +113,11 @@ function groupCheckins(ids, sites, events) {
   return { groups: [...groups.values()], unresolved };
 }
 
-const recorded = (store) => store.db.prepare(
-  "SELECT min(business_date) first,max(business_date) last FROM events WHERE json_extract(data,'$.kind')='checkin'",
-).get();
+// An ordered LIMIT 1 stops early on the business_date index; min()/max() would read every event.
+const bound = (store, order) => store.sql(
+  `SELECT business_date FROM events WHERE json_extract(data,'$.kind')='checkin' ORDER BY business_date ${order} LIMIT 1`,
+).get()?.business_date ?? null;
+const recorded = (store) => ({ first: bound(store, "ASC"), last: bound(store, "DESC") });
 const newestRow = (a, b) => b.businessDate.localeCompare(a.businessDate) ||
   b.occurredAt.localeCompare(a.occurredAt) || a.id.localeCompare(b.id);
 
@@ -123,7 +125,7 @@ function checkinRows(store, range, siteId) {
   if (siteId) store.require("site", siteId);
   const ids = identities(store), sites = new Map(store.list("site").map((s) => [s.id, s]));
   const { groups, unresolved } = groupCheckins(ids, sites,
-    store.db.prepare(CHECKINS + NEWEST).all(range.start, range.end));
+    store.sql(CHECKINS + NEWEST).all(range.start, range.end));
   const bounds = recorded(store);
   return {
     rows: groups.map((g) => g.row).filter((r) => !siteId || r.siteId === siteId).sort(newestRow),
@@ -245,7 +247,7 @@ export function checkinStates(store, data, now = new Date(), only) {
   const date = dayKey(now, ZONE), range = [shift(date, -7), shift(date, 1)];
   const executorOf = (a) => (a.checkinAccountId && ids.canonical(a.checkinAccountId)) || a;
   let events;
-  if (!only) events = store.db.prepare(CHECKINS + NEWEST).all(...range);
+  if (!only) events = store.sql(CHECKINS + NEWEST).all(...range);
   else {
     const wanted = new Set(only.flatMap((a) => [a.id, executorOf(a).id]));
     const accountIds = data.accounts.filter((a) => wanted.has(ids.canonical(a.id)?.id)).map((a) => a.id);
@@ -305,8 +307,8 @@ const summaryBucket = ({ status, row }) =>
       : status.state === "not_needed" ? "notNeeded"
         : status.state === "pending" ? (row ? "unconfirmed" : "notObserved") : null;
 
-export function dailyResources(resources, now = new Date()) {
-  const store = resources.store, data = resources.snapshot();
+export function dailyResources(resources, now = new Date(), data = resources.snapshot()) {
+  const store = resources.store;
   const today = checkinStates(store, data, now), date = today.date;
   const sites = new Map(data.sites.filter((s) => !s.removed && !s.mergedInto && !s.resourceExcluded).map((s) => [s.id, s]));
   const accounts = data.accounts.filter((a) => !a.mergedInto && a.role !== "checkin" && sites.has(a.siteId))
@@ -317,7 +319,7 @@ export function dailyResources(resources, now = new Date()) {
   const bounds = recorded(store);
   const channels = data.channels.filter((c) => !isRemoved(c) && !isInternal(c) && !c.mergedInto && sites.has(c.siteId));
   const channelIds = new Set(channels.map((c) => c.id));
-  const passed = data.offerings.filter((o) => channelIds.has(o.channelId) && verified(o, data.channels.find((c) => c.id === o.channelId)));
+  const passed = data.offerings.filter((o) => channelIds.has(o.channelId) && verified(o, data.channelById.get(o.channelId)));
   return {
     date, timezone: ZONE, observedAt: now.toISOString(),
     checkinSummary: { expected: counted.length,

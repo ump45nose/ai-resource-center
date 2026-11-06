@@ -13,6 +13,7 @@ export const hash = (value) => createHash("sha256").update(value).digest("hex");
 export class Store {
   constructor(dir) {
     this.revision = 0;
+    this.statements = new Map();
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     const keyPath = join(dir, "master.key");
     if (existsSync(join(dir, "center.sqlite")) && !existsSync(keyPath))
@@ -84,39 +85,40 @@ export class Store {
       throw error;
     }
   }
+  sql(text) {
+    let statement = this.statements.get(text);
+    if (!statement)
+      this.statements.set(text, (statement = this.db.prepare(text)));
+    return statement;
+  }
   get(kind, id) {
-    const r = this.db
-      .prepare("SELECT data,version FROM entities WHERE kind=? AND id=?")
-      .get(kind, id);
+    const r = this.sql(
+      "SELECT data,version FROM entities WHERE kind=? AND id=?",
+    ).get(kind, id);
     return r ? { ...JSON.parse(r.data), id, version: r.version } : null;
   }
   list(kind) {
-    return this.db
-      .prepare(
-        "SELECT id,data,version FROM entities WHERE kind=? ORDER BY rowid",
-      )
+    return this.sql(
+      "SELECT id,data,version FROM entities WHERE kind=? ORDER BY rowid",
+    )
       .all(kind)
       .map((r) => ({ ...JSON.parse(r.data), id: r.id, version: r.version }));
   }
   put(kind, value) {
     this.revision++;
     const { id = randomUUID(), version = 1, ...data } = value;
-    this.db
-      .prepare(
-        "INSERT INTO entities VALUES(?,?,?,?) ON CONFLICT(kind,id) DO UPDATE SET data=excluded.data,version=excluded.version",
-      )
-      .run(kind, id, JSON.stringify(data), version);
+    this.sql(
+      "INSERT INTO entities VALUES(?,?,?,?) ON CONFLICT(kind,id) DO UPDATE SET data=excluded.data,version=excluded.version",
+    ).run(kind, id, JSON.stringify(data), version);
     return this.get(kind, id);
   }
   setting(key, value) {
     if (value !== undefined) this.revision++;
     if (value !== undefined)
-      this.db
-        .prepare(
-          "INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data",
-        )
-        .run(key, JSON.stringify(value));
-    const r = this.db.prepare("SELECT data FROM settings WHERE key=?").get(key);
+      this.sql(
+        "INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data",
+      ).run(key, JSON.stringify(value));
+    const r = this.sql("SELECT data FROM settings WHERE key=?").get(key);
     return r ? JSON.parse(r.data) : null;
   }
   ref(source, kind, externalId, id) {

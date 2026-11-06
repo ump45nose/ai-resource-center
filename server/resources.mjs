@@ -38,6 +38,20 @@ const rpOutOfCenter = () =>
   );
 
 const purpose = (c) => c.category || "general";
+const byId = (rows) => new Map(rows.map((row) => [row.id, row]));
+const group = (rows, key) => Map.groupBy(rows, (row) => row[key]);
+// Same pick as a stable newest-first sort: the newest scan, the earlier row on a tie.
+function latestScans(scans) {
+  const latest = new Map();
+  for (const scan of scans)
+    for (const catalog of scan.channelCatalogs || []) {
+      const old = latest.get(catalog.channelId);
+      if (old?.scan === scan) continue;
+      if (!old || scan.scannedAt.localeCompare(old.scan.scannedAt) > 0)
+        latest.set(catalog.channelId, { scan, catalog });
+    }
+  return latest;
+}
 const knownModels = (c, scan, offerings) => [
   ...new Set([
     ...(c.models || []),
@@ -501,28 +515,53 @@ export class Resources {
     return this.update("channel", id, version, changes);
   }
   snapshot() {
+    const sites = this.store.list("site"),
+      accounts = this.store.list("account"),
+      channels = this.store.list("channel"),
+      offerings = this.store.list("offering"),
+      evaluations = this.store.list("evaluation"),
+      scans = this.store.list("modelScan");
     return {
-      sites: this.store.list("site"),
-      accounts: this.store.list("account"),
-      channels: this.store.list("channel"),
-      offerings: this.store.list("offering"),
-      evaluations: this.store.list("evaluation"),
-      scans: this.store.list("modelScan"),
+      sites,
+      accounts,
+      channels,
+      offerings,
+      evaluations,
+      scans,
+      siteById: byId(sites),
+      accountById: byId(accounts),
+      channelById: byId(channels),
+      accountsBySite: group(accounts, "siteId"),
+      channelsBySite: group(channels, "siteId"),
+      offeringsByChannel: group(offerings, "channelId"),
+      evaluationsByChannel: group(evaluations, "channelId"),
+      latestScans: latestScans(scans),
+    };
+  }
+  // One GROUP BY per snapshot, run only when a channel view needs call totals.
+  callStats(channelId, data) {
+    data.calls ??= new Map(
+      this.store
+        .sql(
+          "SELECT channel_id,count(*) total,sum(result='success') success,sum(result='failure') failure,max(occurred_at) lastAt FROM calls GROUP BY channel_id",
+        )
+        .all()
+        .map(({ channel_id, ...stats }) => [channel_id, stats]),
+    );
+    return {
+      total: 0,
+      success: null,
+      failure: null,
+      lastAt: null,
+      ...data.calls.get(channelId),
     };
   }
   publicChannel(c, data = this.snapshot()) {
     const blocked = probeBlock(this.store, c, data.channels);
-    const archiveReasons = archiveOf(
-      c,
-      data.sites.find((s) => s.id === c.siteId),
-    );
+    const archiveReasons = archiveOf(c, data.siteById.get(c.siteId));
     const recovery = maintenanceStatus(this.store, c, { blocked });
-    const stats = this.store.db
-      .prepare(
-        "SELECT count(*) total, sum(result='success') success, sum(result='failure') failure, max(occurred_at) lastAt FROM calls WHERE channel_id=?",
-      )
-      .get(c.id);
-    const verification = data.offerings.filter((x) => x.channelId === c.id);
+    const stats = this.callStats(c.id, data);
+    const verification = [...(data.offeringsByChannel.get(c.id) || [])];
     const view = {
       ...publicValue(c),
       synchronization: this.distribution?.channelStatus(c.id) || [],
@@ -567,12 +606,11 @@ export class Resources {
     };
   }
   scanObservation(c, data) {
-    const scans = (data?.scans || this.store.list("modelScan"))
-      .filter((s) => s.channelCatalogs?.some((r) => r.channelId === c.id))
-      .sort((a, b) => b.scannedAt.localeCompare(a.scannedAt));
-    const scan = scans[0];
-    if (!scan) return null;
-    const catalog = scan.channelCatalogs.find((r) => r.channelId === c.id);
+    const found = (
+      data?.latestScans || latestScans(this.store.list("modelScan"))
+    ).get(c.id);
+    if (!found) return null;
+    const { scan, catalog } = found;
     return {
       scannedAt: scan.scannedAt,
       catalogStatus: catalog.status,
@@ -582,7 +620,11 @@ export class Resources {
     };
   }
   evaluations(channelId, modelId, data) {
-    return (data?.evaluations || this.store.list("evaluation"))
+    return (
+      channelId && data
+        ? data.evaluationsByChannel.get(channelId) || []
+        : data?.evaluations || this.store.list("evaluation")
+    )
       .filter(
         (e) =>
           (!channelId || e.channelId === channelId) &&
@@ -615,20 +657,20 @@ export class Resources {
       }));
   }
   detail(id, data = this.snapshot(), today) {
-    const site = data.sites.find((s) => s.id === id);
+    const site = data.siteById.get(id);
     if (!site) throw new Problem(404, "站点不存在");
-    const own = data.accounts.filter(
-      (a) => a.siteId === id && !a.mergedInto && a.role !== "checkin",
+    const own = (data.accountsBySite.get(id) || []).filter(
+      (a) => !a.mergedInto && a.role !== "checkin",
     );
     today ||= checkinStates(this.store, data, new Date(), own);
     const accounts = own
       .map((a) => {
         const rights = entitlement(a);
         const executor = a.checkinAccountId
-          ? data.accounts.find((x) => x.id === a.checkinAccountId)
+          ? data.accountById.get(a.checkinAccountId)
           : a;
-        const checkins = this.store.db
-          .prepare(
+        const checkins = this.store
+          .sql(
             "SELECT occurred_at,business_date,data FROM events WHERE account_id=? AND json_extract(data,'$.kind')='checkin' ORDER BY occurred_at DESC LIMIT 30",
           )
           .all(executor.id)
@@ -661,8 +703,8 @@ export class Resources {
       ...publicValue(site),
       websiteUrl: site.url,
       accounts,
-      channels: data.channels
-        .filter((c) => c.siteId === id && !isRemoved(c) && !isInternal(c))
+      channels: (data.channelsBySite.get(id) || [])
+        .filter((c) => !isRemoved(c) && !isInternal(c))
         .map((c) => this.publicChannel(c, data)),
     };
   }
@@ -688,12 +730,8 @@ export class Resources {
           // Account-only sources are visible; retired/removed connections are not
           // brought back as empty sites merely because their history has accounts.
           if (
-            data.channels.some(
-              (c) =>
-                c.siteId === s.id &&
-                !c.sourceOnly &&
-                !c.mergedInto &&
-                !rpRemoved(c),
+            (data.channelsBySite.get(s.id) || []).some(
+              (c) => !c.sourceOnly && !c.mergedInto && !rpRemoved(c),
             )
           )
             return false;
@@ -771,12 +809,16 @@ export class Resources {
     const data = this.snapshot();
     const rows = data.channels
       .filter((c) => !isRemoved(c) && !isInternal(c) &&
-        !this.store.get("site", c.siteId)?.resourceExcluded)
+        !data.siteById.get(c.siteId)?.resourceExcluded)
       .flatMap((c) => {
         const view = this.publicChannel(c, data),
-          active = new Set(view.activeModels);
+          active = new Set(view.activeModels),
+          account = publicValue(data.accountById.get(c.accountId) ?? null),
+          offerings = new Map();
+        for (const o of view.modelAvailability)
+          if (!offerings.has(o.modelId)) offerings.set(o.modelId, o);
         return view.knownModels.map((modelId) => {
-          const o = view.modelAvailability.find((o) => o.modelId === modelId);
+          const o = offerings.get(modelId);
           return {
             channelId: c.id,
             siteId: c.siteId,
@@ -788,7 +830,7 @@ export class Resources {
             applications: applicationsOf(c),
             capabilityClass: o?.capabilityClass || "unclassified",
             ...o,
-            account: publicValue(this.store.get("account", c.accountId)),
+            account,
             gatewayApplied: o?.apply?.state || c.apply || "pending",
             historicalEvaluations: this.evaluations(c.id, modelId, data),
             configured: (
@@ -817,12 +859,12 @@ export class Resources {
       );
     return paginate(rows, query);
   }
-  attention() {
-    const rows = [];
-    for (const c of this.store
-      .list("channel")
+  attention(data) {
+    const rows = [],
+      sites = data?.siteById || byId(this.store.list("site"));
+    for (const c of (data?.channels || this.store.list("channel"))
       .filter((c) => !isRemoved(c) && !isInternal(c) &&
-        !this.store.get("site", c.siteId)?.resourceExcluded)) {
+        !sites.get(c.siteId)?.resourceExcluded)) {
       const kind =
         !c.credentialId && !c.gateway && !c.nativeCredentialRef
           ? "missing_key"
@@ -858,36 +900,34 @@ export class Resources {
     return rows;
   }
   overview() {
-    const channels = this.store
-      .list("channel")
-      .filter((c) => !isRemoved(c) && !isInternal(c) &&
-        !this.store.get("site", c.siteId)?.resourceExcluded);
-    const accounts = this.store.list("account");
+    const data = this.snapshot();
+    const channels = data.channels.filter((c) => !isRemoved(c) && !isInternal(c) &&
+      !data.siteById.get(c.siteId)?.resourceExcluded);
     return {
       observedAt: new Date().toISOString(),
-      sites: this.store.list("site").filter((s) => !s.removed && !s.mergedInto && !s.resourceExcluded).length,
+      sites: data.sites.filter((s) => !s.removed && !s.mergedInto && !s.resourceExcluded).length,
       channels: Object.fromEntries(
         ["general", "media", "client"].map((p) => [
           p,
           channels.filter((c) => purpose(c) === p).length,
         ]),
       ),
-      dailyEntitlements: accounts
+      dailyEntitlements: data.accounts
         .filter(
           (a) => !a.mergedInto && a.enabled !== false &&
-            !this.store.get("site", a.siteId)?.resourceExcluded &&
-            !this.store.get("site", a.siteId)?.removed && entitlement(a).daily,
+            !data.siteById.get(a.siteId)?.resourceExcluded &&
+            !data.siteById.get(a.siteId)?.removed && entitlement(a).daily,
         )
         .map((a) => ({ accountId: a.id, ...entitlement(a) })),
-      checkins: this.store.db
-        .prepare(
+      checkins: this.store
+        .sql(
           "SELECT account_id,data FROM events WHERE business_date=? ORDER BY occurred_at DESC",
         )
         .all(dayKey(new Date()))
         .filter((r) => JSON.parse(r.data).kind === "checkin")
         .map((r) => ({ accountId: r.account_id, ...JSON.parse(r.data) })),
-      attention: this.attention(),
-      daily: dailyResources(this),
+      attention: this.attention(data),
+      daily: dailyResources(this, undefined, data),
     };
   }
   previewChanges(input) {
