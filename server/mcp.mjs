@@ -62,7 +62,7 @@ export async function mcpRequest(capabilities, auth, req) {
   await server.connect(transport);
   try {
     return await transport.handleRequest(
-      new Request(`http://${req.headers.host}/mcp`, {
+      new Request("http://localhost/mcp", {
         method: "POST",
         headers: Object.fromEntries(
           transportHeaders

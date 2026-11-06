@@ -252,6 +252,10 @@ test("MCP forwards only the headers its transport reads", async (t) => {
   assert.ok(
     padded.json().result.tools.some((tool) => tool.name === "resource_history"),
   );
+  for (const host of ["bad host", "[::1", "example.test:99999"]) {
+    const r = await post({ host });
+    assert.equal(r.statusCode, 200, `${host}: ${r.body.slice(0, 200)}`);
+  }
 });
 
 test("bindings share task checks and partial updates keep other fields", async (t) => {
