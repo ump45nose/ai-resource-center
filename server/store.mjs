@@ -13,6 +13,9 @@ export const hash = (value) => createHash("sha256").update(value).digest("hex");
 export class Store {
   constructor(dir) {
     this.revision = 0;
+    this.statements = new Map();
+    this.watchers = new Map();
+    this.written = [];
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     const keyPath = join(dir, "master.key");
     if (existsSync(join(dir, "center.sqlite")) && !existsSync(keyPath))
@@ -71,6 +74,7 @@ export class Store {
       }
     this.db.exec("BEGIN IMMEDIATE");
     this.aborted = null;
+    this.written = [];
     try {
       const result = fn();
       // A nested failure dooms the whole transaction even if a caller caught it.
@@ -81,42 +85,113 @@ export class Store {
       if (this.db.isTransaction) this.db.exec("ROLLBACK");
       // Caches keyed by revision may hold rows from the rolled-back writes.
       this.revision++;
+      for (const [kind, id] of this.written) this.notify(kind, id);
+      if (this.callsTouched) this.callTotals = null;
       throw error;
+    } finally {
+      this.written = [];
+      this.callsTouched = false;
+    }
+  }
+  sql(text) {
+    let statement = this.statements.get(text);
+    if (!statement)
+      this.statements.set(text, (statement = this.db.prepare(text)));
+    return statement;
+  }
+  // Collects ids of `kind` written through put(), including writes later rolled back.
+  watch(kind) {
+    const ids = new Set();
+    this.watchers.set(kind, [...(this.watchers.get(kind) || []), ids]);
+    return ids;
+  }
+  notify(kind, id) {
+    for (const ids of this.watchers.get(kind) || []) ids.add(id);
+  }
+  // Commits from other connections, such as maintenance scripts, invalidate derived caches.
+  externalVersion() {
+    return this.sql("PRAGMA data_version").get().data_version;
+  }
+  // All in-process writes to calls go through recordCall(), which reports them here.
+  callStats(channelId) {
+    const version = this.externalVersion();
+    if (!this.callTotals || this.callTotalsVersion !== version) {
+      this.callTotals = new Map(
+        this.sql(
+          "SELECT channel_id,count(*) total,sum(result='success') success,sum(result='failure') failure,max(occurred_at) lastAt FROM calls GROUP BY channel_id",
+        )
+          .all()
+          .map(({ channel_id, ...stats }) => [channel_id, stats]),
+      );
+      this.callTotalsVersion = version;
+      if (this.db.isTransaction) this.callsTouched = true;
+    }
+    return {
+      total: 0,
+      success: null,
+      failure: null,
+      lastAt: null,
+      ...this.callTotals.get(channelId),
+    };
+  }
+  noteCall(before, after) {
+    if (!this.callTotals) return;
+    if (this.db.isTransaction) this.callsTouched = true;
+    for (const [row, sign] of [
+      [before, -1],
+      [after, 1],
+    ]) {
+      if (!row) continue;
+      const stats = this.callTotals.get(row.channel_id) || {
+        total: 0,
+        success: 0,
+        failure: 0,
+      };
+      const total = stats.total + sign;
+      if (!total) this.callTotals.delete(row.channel_id);
+      else
+        this.callTotals.set(row.channel_id, {
+          total,
+          success: stats.success + sign * (row.result === "success"),
+          failure: stats.failure + sign * (row.result === "failure"),
+          lastAt: this.sql(
+            "SELECT max(occurred_at) lastAt FROM calls WHERE channel_id=?",
+          ).get(row.channel_id).lastAt,
+        });
     }
   }
   get(kind, id) {
-    const r = this.db
-      .prepare("SELECT data,version FROM entities WHERE kind=? AND id=?")
-      .get(kind, id);
+    const r = this.sql(
+      "SELECT data,version FROM entities WHERE kind=? AND id=?",
+    ).get(kind, id);
     return r ? { ...JSON.parse(r.data), id, version: r.version } : null;
   }
   list(kind) {
-    return this.db
-      .prepare(
-        "SELECT id,data,version FROM entities WHERE kind=? ORDER BY rowid",
-      )
+    return this.sql(
+      "SELECT id,data,version FROM entities WHERE kind=? ORDER BY rowid",
+    )
       .all(kind)
-      .map((r) => ({ ...JSON.parse(r.data), id: r.id, version: r.version }));
+      .map((r) =>
+        Object.assign(JSON.parse(r.data), { id: r.id, version: r.version }),
+      );
   }
   put(kind, value) {
     this.revision++;
     const { id = randomUUID(), version = 1, ...data } = value;
-    this.db
-      .prepare(
-        "INSERT INTO entities VALUES(?,?,?,?) ON CONFLICT(kind,id) DO UPDATE SET data=excluded.data,version=excluded.version",
-      )
-      .run(kind, id, JSON.stringify(data), version);
+    this.sql(
+      "INSERT INTO entities VALUES(?,?,?,?) ON CONFLICT(kind,id) DO UPDATE SET data=excluded.data,version=excluded.version",
+    ).run(kind, id, JSON.stringify(data), version);
+    if (this.db.isTransaction) this.written.push([kind, id]);
+    this.notify(kind, id);
     return this.get(kind, id);
   }
   setting(key, value) {
     if (value !== undefined) this.revision++;
     if (value !== undefined)
-      this.db
-        .prepare(
-          "INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data",
-        )
-        .run(key, JSON.stringify(value));
-    const r = this.db.prepare("SELECT data FROM settings WHERE key=?").get(key);
+      this.sql(
+        "INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data",
+      ).run(key, JSON.stringify(value));
+    const r = this.sql("SELECT data FROM settings WHERE key=?").get(key);
     return r ? JSON.parse(r.data) : null;
   }
   ref(source, kind, externalId, id) {

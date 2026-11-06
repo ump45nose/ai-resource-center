@@ -190,14 +190,24 @@ export function recordCall(
     fields.origin || "live",
     0,
   ].map((v) => v ?? null);
-  store.db
-    .prepare(
+  const before = store
+    .sql(
+      "SELECT channel_id,result,occurred_at FROM calls WHERE source=? AND source_id=?",
+    )
+    .get(values[0], values[1]);
+  store
+    .sql(
       `INSERT INTO calls(${columns}) VALUES(${columns.map(() => "?")}) ON CONFLICT(source,source_id) DO UPDATE SET ${columns
         .slice(2)
         .map((c) => `${c}=excluded.${c}`)
         .join(",")}`,
     )
     .run(...values);
+  store.noteCall(before, {
+    channel_id: values[2],
+    result: values[5],
+    occurred_at: values[4],
+  });
 }
 
 export function receipt(store, source, eventId, action) {

@@ -76,7 +76,7 @@ function checkinRows(store, range, siteId) {
   const ids = identities(store), sites = new Map(store.list("site").map((s) => [s.id, s]));
   const groups = new Map();
   let unresolved = 0;
-  const events = store.db.prepare(
+  const events = store.sql(
     "SELECT id,account_id,occurred_at,business_date,data FROM events WHERE business_date>=? AND business_date<=? AND json_extract(data,'$.kind')='checkin' ORDER BY occurred_at DESC,id DESC",
   ).all(range.start, range.end);
   for (const row of events) {
@@ -111,13 +111,14 @@ function checkinRows(store, range, siteId) {
       group.rewardText ||= event.reward || null;
     }
   }
-  const bounds = store.db.prepare(
-    "SELECT min(business_date) first,max(business_date) last FROM events WHERE json_extract(data,'$.kind')='checkin'",
-  ).get();
+  // An ordered LIMIT 1 stops early on the business_date index; min()/max() would read every event.
+  const bound = (order) => store.sql(
+    `SELECT business_date FROM events WHERE json_extract(data,'$.kind')='checkin' ORDER BY business_date ${order} LIMIT 1`,
+  ).get()?.business_date ?? null;
   return {
     rows: [...groups.values()].sort((a, b) => b.businessDate.localeCompare(a.businessDate) || b.occurredAt.localeCompare(a.occurredAt) || a.id.localeCompare(b.id)),
     coverage: { startDate: range.start, endDate: range.end, timezone: range.timezone,
-      firstRecordedDate: bounds.first, lastRecordedDate: bounds.last,
+      firstRecordedDate: bound("ASC"), lastRecordedDate: bound("DESC"),
       complete: false, unresolvedAccounts: unresolved,
       basis: "仅包含来源已接收的签到记录；缺失日期不表示未签到或收益为零" },
   };
@@ -128,8 +129,8 @@ export function listCheckins(store, query = {}, now = new Date()) {
   return { ...checkinPage(rows, query, [range, query.siteId || null]), coverage };
 }
 
-export function dailyResources(resources, now = new Date()) {
-  const store = resources.store, date = dayKey(now, ZONE), data = resources.snapshot();
+export function dailyResources(resources, now = new Date(), data = resources.snapshot()) {
+  const store = resources.store, date = dayKey(now, ZONE);
   const { rows, coverage } = checkinRows(store, { start: date, end: date, timezone: ZONE });
   const sites = new Map(data.sites.filter((s) => !s.removed && !s.mergedInto && !s.resourceExcluded).map((s) => [s.id, s]));
   const accounts = data.accounts.filter((a) => !a.mergedInto && a.role !== "checkin" && sites.has(a.siteId));
@@ -139,7 +140,7 @@ export function dailyResources(resources, now = new Date()) {
   const observed = new Set(today.map((r) => r.accountId));
   const channels = data.channels.filter((c) => !isRemoved(c) && !isInternal(c) && !c.mergedInto && sites.has(c.siteId));
   const channelIds = new Set(channels.map((c) => c.id));
-  const passed = data.offerings.filter((o) => channelIds.has(o.channelId) && verified(o, data.channels.find((c) => c.id === o.channelId)));
+  const passed = data.offerings.filter((o) => channelIds.has(o.channelId) && verified(o, data.channelById.get(o.channelId)));
   return {
     date, timezone: ZONE, observedAt: now.toISOString(),
     checkinSummary: { expected: new Set([...expected.map((a) => a.id), ...observed]).size,
@@ -158,7 +159,7 @@ export function dailyResources(resources, now = new Date()) {
       name: a.name, enabled: a.enabled !== false, automaticCheckin: a.enabled !== false && automaticCheckin(store, a),
       entitlement: entitlement(a, now) })),
     resourceSummary: { sites: sites.size, registeredChannels: channels.length,
-      catalogReadableChannels: channels.filter((c) => resources.scanObservation(c, data)?.catalogStatus === "ok").length,
+      catalogReadableChannels: channels.filter((c) => resources.scanObservation(c)?.catalogStatus === "ok").length,
       verifiedModels: passed.length, verificationBasis: "渠道与模型组合的已有任务验证结论，非实时可用性保证" },
     coverage,
   };

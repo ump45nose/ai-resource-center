@@ -29,6 +29,41 @@ import {
 } from "./channel-rules.mjs";
 
 const purpose = (c) => c.category || "general";
+const byId = (rows) => new Map(rows.map((row) => [row.id, row]));
+const group = (rows, key) => {
+  const groups = new Map();
+  for (const row of rows) {
+    const list = groups.get(row[key]);
+    if (list) list.push(row);
+    else groups.set(row[key], [row]);
+  }
+  return groups;
+};
+const evaluationView = (e) => ({
+  id: e.id,
+  channelId: e.channelId,
+  modelId: e.model,
+  client: e.client,
+  state: e.state,
+  startedAt: e.startedAt || e.preparedAt,
+  endedAt: e.endedAt,
+  rating: e.rating,
+  records: e.records,
+  piAudit: e.piAudit
+    ? {
+        rounds: e.piAudit.rounds,
+        complete: e.piAudit.complete,
+        svg: e.piAudit.svg,
+        seconds: e.piAudit.seconds,
+        visualReviewed: e.piAudit.visualReviewed,
+      }
+    : undefined,
+  image: e.image
+    ? { file: e.image.file, width: e.image.width, height: e.image.height }
+    : undefined,
+  origin: "legacy",
+  countsTowardCurrentGrade: false,
+});
 const knownModels = (c, scan, offerings) => [
   ...new Set([
     ...(c.models || []),
@@ -479,28 +514,29 @@ export class Resources {
     return this.update("channel", id, version, changes);
   }
   snapshot() {
+    const sites = this.store.list("site"),
+      accounts = this.store.list("account"),
+      channels = this.store.list("channel"),
+      offerings = this.store.list("offering");
     return {
-      sites: this.store.list("site"),
-      accounts: this.store.list("account"),
-      channels: this.store.list("channel"),
-      offerings: this.store.list("offering"),
-      evaluations: this.store.list("evaluation"),
-      scans: this.store.list("modelScan"),
+      sites,
+      accounts,
+      channels,
+      offerings,
+      siteById: byId(sites),
+      accountById: byId(accounts),
+      channelById: byId(channels),
+      accountsBySite: group(accounts, "siteId"),
+      channelsBySite: group(channels, "siteId"),
+      offeringsByChannel: group(offerings, "channelId"),
     };
   }
   publicChannel(c, data = this.snapshot()) {
     const blocked = probeBlock(this.store, c, data.channels);
-    const archiveReasons = archiveOf(
-      c,
-      data.sites.find((s) => s.id === c.siteId),
-    );
+    const archiveReasons = archiveOf(c, data.siteById.get(c.siteId));
     const recovery = maintenanceStatus(this.store, c, { blocked });
-    const stats = this.store.db
-      .prepare(
-        "SELECT count(*) total, sum(result='success') success, sum(result='failure') failure, max(occurred_at) lastAt FROM calls WHERE channel_id=?",
-      )
-      .get(c.id);
-    const verification = data.offerings.filter((x) => x.channelId === c.id);
+    const stats = this.store.callStats(c.id);
+    const verification = [...(data.offeringsByChannel.get(c.id) || [])];
     const view = {
       ...publicValue(c),
       synchronization: this.distribution?.channelStatus(c.id) || [],
@@ -534,9 +570,9 @@ export class Resources {
             : "missing",
       credentialCheckState: c.credentialState || null,
       modelAvailability: verification,
-      historicalEvaluations: this.evaluations(c.id, undefined, data),
+      historicalEvaluations: this.evaluations(c.id),
       calls: stats,
-      scan: this.scanObservation(c, data),
+      scan: this.scanObservation(c),
     };
     return {
       ...view,
@@ -544,66 +580,132 @@ export class Resources {
       activeModels: activeModels(view),
     };
   }
-  scanObservation(c, data) {
-    const scans = (data?.scans || this.store.list("modelScan"))
-      .filter((s) => s.channelCatalogs?.some((r) => r.channelId === c.id))
-      .sort((a, b) => b.scannedAt.localeCompare(a.scannedAt));
-    const scan = scans[0];
-    if (!scan) return null;
-    const catalog = scan.channelCatalogs.find((r) => r.channelId === c.id);
-    return {
-      scannedAt: scan.scannedAt,
-      catalogStatus: catalog.status,
-      catalogModels: catalog.models || [],
-      websiteStatus: scan.website?.status || null,
-      metricCount: scan.metrics?.length || 0,
-    };
+  scanObservation(c) {
+    const scan = this.latestScans().get(c.id);
+    return scan ? { ...scan, catalogModels: [...scan.catalogModels] } : null;
   }
-  evaluations(channelId, modelId, data) {
-    return (data?.evaluations || this.store.list("evaluation"))
-      .filter(
-        (e) =>
-          (!channelId || e.channelId === channelId) &&
-          (!modelId || e.model === modelId),
+  latestScans() {
+    const writes = (this.scanWrites ||= this.store.watch("modelScan")),
+      version = this.store.externalVersion();
+    if (!this.scanSummaries || this.scanVersion !== version) {
+      writes.clear();
+      this.scanSummaries = new Map(this.scanRows().map((s) => [s.id, s]));
+      this.scanVersion = version;
+      this.scanLatest = null;
+    }
+    if (writes.size) {
+      for (const id of writes) {
+        const [s] = this.scanRows(id);
+        if (s) this.scanSummaries.set(id, s);
+        else this.scanSummaries.delete(id);
+      }
+      writes.clear();
+      this.scanLatest = null;
+    }
+    if (!this.scanLatest) {
+      // Same choice as a stable descending sort: the newest scan, then the earliest row.
+      const best = new Map();
+      for (const scan of this.scanSummaries.values())
+        for (const [channelId, catalog] of scan.catalogs) {
+          const old = best.get(channelId),
+            order = old && scan.scannedAt.localeCompare(old.scan.scannedAt);
+          if (!old || order > 0 || (order === 0 && scan.seq < old.scan.seq))
+            best.set(channelId, { scan, catalog });
+        }
+      this.scanLatest = new Map(
+        [...best].map(([channelId, { scan, catalog }]) => [
+          channelId,
+          {
+            scannedAt: scan.scannedAt,
+            catalogStatus: catalog.status,
+            catalogModels: catalog.models || [],
+            websiteStatus: scan.websiteStatus,
+            metricCount: scan.metricCount,
+          },
+        ]),
+      );
+    }
+    return this.scanLatest;
+  }
+  scanRows(id) {
+    return this.store
+      .sql(
+        `SELECT rowid seq,id,json_extract(data,'$.scannedAt') scannedAt,json_extract(data,'$.website.status') websiteStatus,json_array_length(data,'$.metrics') metricCount,json_extract(data,'$.channelCatalogs') catalogs FROM entities WHERE kind='modelScan'${id ? " AND id=?" : ""}`,
       )
-      .map((e) => ({
-        id: e.id,
-        channelId: e.channelId,
-        modelId: e.model,
-        client: e.client,
-        state: e.state,
-        startedAt: e.startedAt || e.preparedAt,
-        endedAt: e.endedAt,
-        rating: e.rating,
-        records: e.records,
-        piAudit: e.piAudit
-          ? {
-              rounds: e.piAudit.rounds,
-              complete: e.piAudit.complete,
-              svg: e.piAudit.svg,
-              seconds: e.piAudit.seconds,
-              visualReviewed: e.piAudit.visualReviewed,
-            }
-          : undefined,
-        image: e.image
-          ? { file: e.image.file, width: e.image.width, height: e.image.height }
-          : undefined,
-        origin: "legacy",
-        countsTowardCurrentGrade: false,
+      .all(...(id ? [id] : []))
+      .map((r) => {
+        const catalogs = new Map();
+        for (const catalog of JSON.parse(r.catalogs) || [])
+          if (!catalogs.has(catalog.channelId))
+            catalogs.set(catalog.channelId, catalog);
+        return {
+          seq: r.seq,
+          id: r.id,
+          scannedAt: r.scannedAt,
+          websiteStatus: r.websiteStatus || null,
+          metricCount: r.metricCount || 0,
+          catalogs,
+        };
+      });
+  }
+  evaluations(channelId, modelId) {
+    const { all, byChannel } = this.evaluationIndex();
+    return (channelId ? byChannel.get(channelId) || [] : all).filter(
+      (e) => !modelId || e.modelId === modelId,
+    );
+  }
+  evaluationIndex() {
+    const writes = (this.evaluationWrites ||= this.store.watch("evaluation")),
+      version = this.store.externalVersion();
+    if (!this.evaluationRows || this.evaluationVersion !== version) {
+      writes.clear();
+      this.evaluationRows = new Map(
+        this.legacyEvaluations().map((e) => [e.id, e]),
+      );
+      this.evaluationVersion = version;
+      this.evaluationViews = null;
+    }
+    if (writes.size) {
+      for (const id of writes) {
+        const [e] = this.legacyEvaluations(id);
+        if (e) this.evaluationRows.set(id, e);
+        else this.evaluationRows.delete(id);
+      }
+      writes.clear();
+      this.evaluationViews = null;
+    }
+    if (!this.evaluationViews) {
+      const all = [...this.evaluationRows.values()]
+        .sort((a, b) => a.seq - b.seq)
+        .map((e) => e.view);
+      this.evaluationViews = { all, byChannel: group(all, "channelId") };
+    }
+    return this.evaluationViews;
+  }
+  legacyEvaluations(id) {
+    return this.store
+      .sql(
+        `SELECT rowid seq,id,data FROM entities WHERE kind='evaluation'${id ? " AND id=?" : ""}`,
+      )
+      .all(...(id ? [id] : []))
+      .map((r) => ({
+        seq: r.seq,
+        id: r.id,
+        view: evaluationView({ ...JSON.parse(r.data), id: r.id }),
       }));
   }
   detail(id, data = this.snapshot()) {
-    const site = data.sites.find((s) => s.id === id);
+    const site = data.siteById.get(id);
     if (!site) throw new Problem(404, "站点不存在");
-    const accounts = data.accounts
-      .filter((a) => a.siteId === id && !a.mergedInto && a.role !== "checkin")
+    const accounts = (data.accountsBySite.get(id) || [])
+      .filter((a) => !a.mergedInto && a.role !== "checkin")
       .map((a) => {
         const rights = entitlement(a);
         const executor = a.checkinAccountId
-          ? data.accounts.find((x) => x.id === a.checkinAccountId)
+          ? data.accountById.get(a.checkinAccountId)
           : a;
-        const checkins = this.store.db
-          .prepare(
+        const checkins = this.store
+          .sql(
             "SELECT occurred_at,business_date,data FROM events WHERE account_id=? AND json_extract(data,'$.kind')='checkin' ORDER BY occurred_at DESC LIMIT 30",
           )
           .all(executor.id)
@@ -633,8 +735,8 @@ export class Resources {
       ...publicValue(site),
       websiteUrl: site.url,
       accounts,
-      channels: data.channels
-        .filter((c) => c.siteId === id && !isRemoved(c) && !isInternal(c))
+      channels: (data.channelsBySite.get(id) || [])
+        .filter((c) => !isRemoved(c) && !isInternal(c))
         .map((c) => this.publicChannel(c, data)),
     };
   }
@@ -659,8 +761,8 @@ export class Resources {
           // Account-only sources are visible; retired/removed connections are not
           // brought back as empty sites merely because their history has accounts.
           if (
-            data.channels.some(
-              (c) => c.siteId === s.id && !c.sourceOnly && !c.mergedInto,
+            (data.channelsBySite.get(s.id) || []).some(
+              (c) => !c.sourceOnly && !c.mergedInto,
             )
           )
             return false;
@@ -738,12 +840,16 @@ export class Resources {
     const data = this.snapshot();
     const rows = data.channels
       .filter((c) => !isRemoved(c) && !isInternal(c) &&
-        !this.store.get("site", c.siteId)?.resourceExcluded)
+        !data.siteById.get(c.siteId)?.resourceExcluded)
       .flatMap((c) => {
         const view = this.publicChannel(c, data),
-          active = new Set(view.activeModels);
+          active = new Set(view.activeModels),
+          account = publicValue(data.accountById.get(c.accountId) ?? null),
+          offerings = new Map();
+        for (const o of view.modelAvailability)
+          if (!offerings.has(o.modelId)) offerings.set(o.modelId, o);
         return view.knownModels.map((modelId) => {
-          const o = view.modelAvailability.find((o) => o.modelId === modelId);
+          const o = offerings.get(modelId);
           return {
             channelId: c.id,
             siteId: c.siteId,
@@ -755,9 +861,9 @@ export class Resources {
             applications: applicationsOf(c),
             capabilityClass: o?.capabilityClass || "unclassified",
             ...o,
-            account: publicValue(this.store.get("account", c.accountId)),
+            account,
             gatewayApplied: o?.apply?.state || c.apply || "pending",
-            historicalEvaluations: this.evaluations(c.id, modelId, data),
+            historicalEvaluations: this.evaluations(c.id, modelId),
             configured: (
               c.sourceObservation?.models ||
               c.models ||
@@ -785,11 +891,12 @@ export class Resources {
     return paginate(rows, query);
   }
   attention() {
-    const rows = [];
+    const rows = [],
+      sites = byId(this.store.list("site"));
     for (const c of this.store
       .list("channel")
       .filter((c) => !isRemoved(c) && !isInternal(c) &&
-        !this.store.get("site", c.siteId)?.resourceExcluded)) {
+        !sites.get(c.siteId)?.resourceExcluded)) {
       const kind =
         !c.credentialId && !c.gateway && !c.nativeCredentialRef
           ? "missing_key"
@@ -825,35 +932,33 @@ export class Resources {
     return rows;
   }
   overview() {
-    const channels = this.store
-      .list("channel")
-      .filter((c) => !isRemoved(c) && !isInternal(c) &&
-        !this.store.get("site", c.siteId)?.resourceExcluded);
-    const accounts = this.store.list("account");
+    const data = this.snapshot();
+    const channels = data.channels.filter((c) => !isRemoved(c) && !isInternal(c) &&
+      !data.siteById.get(c.siteId)?.resourceExcluded);
     return {
       observedAt: new Date().toISOString(),
-      sites: this.store.list("site").filter((s) => !s.removed && !s.mergedInto && !s.resourceExcluded).length,
+      sites: data.sites.filter((s) => !s.removed && !s.mergedInto && !s.resourceExcluded).length,
       channels: Object.fromEntries(
         ["general", "media", "rp", "client"].map((p) => [
           p,
           channels.filter((c) => purpose(c) === p).length,
         ]),
       ),
-      dailyEntitlements: accounts
+      dailyEntitlements: data.accounts
         .filter(
           (a) => !a.mergedInto && a.enabled !== false &&
-            !this.store.get("site", a.siteId)?.resourceExcluded && entitlement(a).daily,
+            !data.siteById.get(a.siteId)?.resourceExcluded && entitlement(a).daily,
         )
         .map((a) => ({ accountId: a.id, ...entitlement(a) })),
-      checkins: this.store.db
-        .prepare(
+      checkins: this.store
+        .sql(
           "SELECT account_id,data FROM events WHERE business_date=? ORDER BY occurred_at DESC",
         )
         .all(dayKey(new Date()))
         .filter((r) => JSON.parse(r.data).kind === "checkin")
         .map((r) => ({ accountId: r.account_id, ...JSON.parse(r.data) })),
       attention: this.attention(),
-      daily: dailyResources(this),
+      daily: dailyResources(this, undefined, data),
     };
   }
   previewChanges(input) {

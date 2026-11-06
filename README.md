@@ -32,6 +32,8 @@ DATA_DIR=./data PORT=18323 npm start
 
 `npm run build` 执行类型检查并生成前端产物；`npm start` 同源提供 WebUI、API 和 MCP。新数据目录的首次登录密码写入 `data/admin-password`；已有数据沿用原密码和配套 `master.key`。
 
+`node scripts/bench-overview.mjs` 在 `/tmp` 生成生产量级数据，为概览、来源、站点、模型、签到和待处理接口计时；`--export` 以固定时钟导出响应，`--compare` 逐字节比较两个版本（`--help` 查看参数）。
+
 ## fn 部署
 
 源码与 Compose：`~/code/ai-resource-center`（`/vol1/1000/Code/ai-resource-center`）。

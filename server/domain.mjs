@@ -36,8 +36,16 @@ export function headers(input) {
   }
   return Object.entries(out).map(([name, value]) => ({ name, value }));
 }
+// Building a formatter costs far more than formatting with it.
+const formatters = new Map();
+const formatter = (locale, options) => {
+  const key = JSON.stringify([locale, options]);
+  if (!formatters.has(key))
+    formatters.set(key, new Intl.DateTimeFormat(locale, options));
+  return formatters.get(key);
+};
 export function dayKey(time, tz = "Asia/Shanghai") {
-  return new Intl.DateTimeFormat("en-CA", {
+  return formatter("en-CA", {
     timeZone: tz,
     year: "numeric",
     month: "2-digit",
@@ -49,7 +57,7 @@ export function nextReset(time, tz, resetAt) {
     [hour, minute] = resetAt.split(":").map(Number);
   const partsAt = (d) =>
     Object.fromEntries(
-      new Intl.DateTimeFormat("en-CA", {
+      formatter("en-CA", {
         timeZone: tz,
         year: "numeric",
         month: "2-digit",
@@ -83,7 +91,7 @@ export function nextReset(time, tz, resetAt) {
   return new Date(end).toISOString();
 }
 export const clock = (tz) =>
-  new Intl.DateTimeFormat("en-GB", {
+  formatter("en-GB", {
     timeZone: tz,
     hour: "2-digit",
     minute: "2-digit",

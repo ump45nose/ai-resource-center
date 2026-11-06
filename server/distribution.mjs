@@ -117,33 +117,45 @@ export class Distribution {
     );
   }
   currentJobs(id) {
-    if (
-      !this.config(id).enabled &&
-      !this.store.list("delivery").some((j) => j.target === id)
-    )
-      return [];
     const cacheKey = `${this.store.revision}:${Math.floor(Date.now() / 5000)}`;
     this.jobCache ||= new Map();
     if (this.jobCache.get(id)?.key === cacheKey)
       return this.jobCache.get(id).jobs;
-    const entries = new Map(
-      this.managedEntries(id).map((e) => [e.subject, digest(e.payload)]),
-    );
-    const jobs = [
-      ...new Map(
-        this.store
-          .list("delivery")
-          .filter(
-            (j) =>
-              j.target === id &&
-              j.state !== "superseded" &&
-              entries.get(j.subject) === j.revision,
-          )
-          .map((j) => [j.subject, j]),
-      ).values(),
-    ];
+    let jobs = [];
+    if (
+      this.config(id).enabled ||
+      this.store
+        .sql(
+          "SELECT 1 FROM entities WHERE kind='delivery' AND json_extract(data,'$.target')=? LIMIT 1",
+        )
+        .get(id)
+    ) {
+      const entries = new Map(
+        this.managedEntries(id).map((e) => [e.subject, digest(e.payload)]),
+      );
+      jobs = [
+        ...new Map(
+          this.deliveries(id, [...entries.values()])
+            .filter(
+              (j) =>
+                j.state !== "superseded" &&
+                entries.get(j.subject) === j.revision,
+            )
+            .map((j) => [j.subject, j]),
+        ).values(),
+      ];
+    }
     this.jobCache.set(id, { key: cacheKey, jobs });
     return jobs;
+  }
+  // Delivery history grows with every change; read only rows carrying a current revision.
+  deliveries(target, revisions) {
+    return this.store
+      .sql(
+        "SELECT id,data,version FROM entities WHERE kind='delivery' AND json_extract(data,'$.target')=? AND json_extract(data,'$.revision') IN (SELECT value FROM json_each(?)) ORDER BY rowid",
+      )
+      .all(target, JSON.stringify(revisions))
+      .map((r) => ({ ...JSON.parse(r.data), id: r.id, version: r.version }));
   }
   list() {
     return Object.keys(targetNames).map((id) => {
@@ -365,40 +377,45 @@ export class Distribution {
           !!this.store.get("targetLink", `${id}:${c.id}`)?.remoteId ||
           c.gateway?.sourceId === this.source(this.config(id)).id,
       )
-      .map((c) => ({
-        subject: c.id,
-        payload: {
-          channelId: c.id,
-          siteId: c.siteId,
-          accountId: c.accountId,
-          name: c.name,
-          baseUrl:
-            id === "newapi" ? canonicalApi(c.baseUrl, c.protocol) : c.baseUrl,
-          protocol: c.protocol,
-          models:
-            id === "newapi" ? routableModels(this.store, c) : c.models || [],
-          usage: usageOf(c),
-          tags: tagsOf(c),
-          enabled:
-            active(c) &&
-            (id === "newapi"
-              ? usageOf(c) !== "rp" && c.gatewayAllowed !== false
-                && routableModels(this.store, c).length > 0
-              : usageOf(c) === "rp"),
-          order: c.order || 0,
-          credentialId: c.credentialId || null,
-          credentialHeadersId: c.credentialHeadersId || null,
-          nativeCredentialRef: c.nativeCredentialRef || null,
-          credentialFingerprint: c.credentialId
-            ? this.store.db
-                .prepare("SELECT fingerprint FROM credentials WHERE id=?")
-                .get(c.credentialId)?.fingerprint
-            : null,
-          routing: id === "newapi" ? this.routing(c) : null,
-          connectionVersion: c.connectionVersion || 1,
-          headerValues: channelHeaders(this.store, c),
-        },
-      }));
+      .map((c) => {
+        const models =
+          id === "newapi" ? routableModels(this.store, c) : c.models || [];
+        return {
+          subject: c.id,
+          payload: {
+            channelId: c.id,
+            siteId: c.siteId,
+            accountId: c.accountId,
+            name: c.name,
+            baseUrl:
+              id === "newapi"
+                ? canonicalApi(c.baseUrl, c.protocol)
+                : c.baseUrl,
+            protocol: c.protocol,
+            models,
+            usage: usageOf(c),
+            tags: tagsOf(c),
+            enabled:
+              active(c) &&
+              (id === "newapi"
+                ? usageOf(c) !== "rp" && c.gatewayAllowed !== false
+                  && models.length > 0
+                : usageOf(c) === "rp"),
+            order: c.order || 0,
+            credentialId: c.credentialId || null,
+            credentialHeadersId: c.credentialHeadersId || null,
+            nativeCredentialRef: c.nativeCredentialRef || null,
+            credentialFingerprint: c.credentialId
+              ? this.store
+                  .sql("SELECT fingerprint FROM credentials WHERE id=?")
+                  .get(c.credentialId)?.fingerprint
+              : null,
+            routing: id === "newapi" ? this.routing(c) : null,
+            connectionVersion: c.connectionVersion || 1,
+            headerValues: channelHeaders(this.store, c),
+          },
+        };
+      });
   }
   revision(id) {
     return digest({

@@ -145,13 +145,13 @@ export function probeBlock(store, c, channels) {
   if (c.management?.state === "paused") return "人工暂停";
   if (tagsOf(c).includes("no_probe")) return "禁止测活";
   if (c.credentialId) {
-    const fp = store.db
-      .prepare("SELECT fingerprint FROM credentials WHERE id=?")
+    const fp = store
+      .sql("SELECT fingerprint FROM credentials WHERE id=?")
       .get(c.credentialId)?.fingerprint;
     const same = new Set(
       fp
-        ? store.db
-            .prepare("SELECT id FROM credentials WHERE fingerprint=?")
+        ? store
+            .sql("SELECT id FROM credentials WHERE fingerprint=?")
             .all(fp)
             .map((r) => r.id)
         : [c.credentialId],

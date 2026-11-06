@@ -2,6 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { issueToken } from "../server/auth.mjs";
 import { ingestRpCalls } from "../server/rp-calls.mjs";
+import { recordCall } from "../server/ingest.mjs";
+import { listCheckins } from "../server/checkins.mjs";
+import { digest } from "../server/canonical.mjs";
 import { fixture } from "./helpers.mjs";
 
 test("nested transactions join the outer one and roll back together", async (t) => {
@@ -256,5 +259,149 @@ test("channel views and model rows share the server availability rule", async (t
       [`${paused.id}:model-P`]: false,
       [`${keyless.id}:model-K`]: false,
     },
+  );
+});
+
+test("cached channel views match a full re-read after writes, ties and rollbacks", async (t) => {
+  const { store, resources, site, account, channel, app } = await fixture(t);
+  const rp = resources.channel({
+    siteId: site.id,
+    accountId: account.id,
+    name: "RP",
+    baseUrl: "https://upstream.test/v1",
+    models: ["model-B"],
+    usage: "rp",
+  });
+  const { distribution } = app.services;
+  // The pre-cache rules, recomputed from every stored row.
+  const reread = (c) => {
+    const [scan] = store
+      .list("modelScan")
+      .filter((s) => s.channelCatalogs?.some((r) => r.channelId === c.id))
+      .sort((a, b) => b.scannedAt.localeCompare(a.scannedAt));
+    const catalog = scan?.channelCatalogs.find((r) => r.channelId === c.id);
+    const revisions = new Map(
+      distribution
+        .managedEntries("sillytavern")
+        .map((e) => [e.subject, digest(e.payload)]),
+    );
+    const current = new Map(
+      store
+        .list("delivery")
+        .filter(
+          (j) =>
+            j.target === "sillytavern" &&
+            j.state !== "superseded" &&
+            revisions.get(j.subject) === j.revision,
+        )
+        .map((j) => [j.subject, j.id]),
+    );
+    return {
+      calls: {
+        ...store.db
+          .prepare(
+            "SELECT count(*) total, sum(result='success') success, sum(result='failure') failure, max(occurred_at) lastAt FROM calls WHERE channel_id=?",
+          )
+          .get(c.id),
+      },
+      scan: scan
+        ? {
+            scannedAt: scan.scannedAt,
+            catalogStatus: catalog.status,
+            catalogModels: catalog.models || [],
+            websiteStatus: scan.website?.status || null,
+            metricCount: scan.metrics?.length || 0,
+          }
+        : null,
+      evaluations: store
+        .list("evaluation")
+        .filter((e) => e.channelId === c.id)
+        .map((e) => e.id),
+      jobs: current.has(c.id) ? [current.get(c.id)] : [],
+    };
+  };
+  const check = () => {
+    for (const c of [channel, rp]) {
+      const view = resources.publicChannel(store.require("channel", c.id));
+      assert.deepEqual(
+        {
+          calls: view.calls,
+          scan: view.scan,
+          evaluations: view.historicalEvaluations.map((e) => e.id),
+          jobs: view.synchronization.map((j) => j.id),
+        },
+        reread(c),
+      );
+    }
+  };
+  const scan = (id, scannedAt, channels) =>
+    store.put("modelScan", {
+      id,
+      scannedAt,
+      website: { status: "reachable" },
+      metrics: [{ name: "model-A" }],
+      channelCatalogs: channels.map((c) => ({
+        channelId: c.id,
+        status: "ok",
+        models: [id],
+      })),
+    });
+  check();
+  recordCall(store, "rp", "a", channel.id, "model-A", "2026-11-01T00:00:00.000Z", "pending");
+  check();
+  recordCall(store, "rp", "a", channel.id, "model-A", "2026-11-01T00:00:00.000Z", "success");
+  recordCall(store, "rp", "b", channel.id, "model-A", "2026-11-02T00:00:00.000Z", "failure");
+  check();
+  recordCall(store, "rp", "b", rp.id, "model-B", "2026-10-30T00:00:00.000Z", "success");
+  check();
+  scan("https://a.test", "2026-11-01T00:00:00.000Z", [channel, rp]);
+  scan("https://b.test", "2026-11-01T00:00:00.000Z", [rp]);
+  check();
+  scan("https://a.test", "2026-11-02T00:00:00.000Z", [rp]);
+  check();
+  store.put("evaluation", { channelId: channel.id, model: "model-A", piAudit: { svg: "<svg/>" } });
+  check();
+  const revision = digest(
+    distribution.managedEntries("sillytavern").find((e) => e.subject === rp.id).payload,
+  );
+  for (const [state, value] of [
+    ["applied", revision],
+    ["applied", "older"],
+    ["applied", revision],
+    ["superseded", revision],
+  ])
+    store.put("delivery", { target: "sillytavern", subject: rp.id, revision: value, state });
+  check();
+  assert.throws(
+    () =>
+      store.transaction(() => {
+        recordCall(store, "rp", "c", channel.id, "model-A", "2026-11-03T00:00:00.000Z", "success");
+        scan("https://c.test", "2026-11-03T00:00:00.000Z", [channel]);
+        scan("https://a.test", "2026-11-04T00:00:00.000Z", [channel]);
+        store.put("evaluation", { channelId: rp.id, model: "model-B" });
+        store.put("delivery", { target: "sillytavern", subject: rp.id, revision, state: "applied" });
+        check();
+        throw new Error("rolled back");
+      }),
+    /rolled back/,
+  );
+  check();
+  const event = store.db.prepare("INSERT INTO events VALUES(?,?,?,?,?)");
+  for (const [id, date, kind] of [
+    ["first-account", "2025-01-01", "account"],
+    ["first-checkin", "2025-02-01", "checkin"],
+    ["last-checkin", "2026-11-05", "checkin"],
+    ["last-account", "2026-11-06", "account"],
+  ])
+    event.run(id, account.id, `${date}T01:00:00.000Z`, date, JSON.stringify({ kind, result: "成功" }));
+  const bounds = store.db
+    .prepare(
+      "SELECT min(business_date) first,max(business_date) last FROM events WHERE json_extract(data,'$.kind')='checkin'",
+    )
+    .get();
+  const { coverage } = listCheckins(store, {}, new Date("2026-11-06T04:00:00Z"));
+  assert.deepEqual(
+    [coverage.firstRecordedDate, coverage.lastRecordedDate],
+    [bounds.first, bounds.last],
   );
 });

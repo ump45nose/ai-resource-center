@@ -1,6 +1,10 @@
 import Fastify from "fastify";
 import { Distribution } from "./distribution.mjs";
-import { migrateChannels, migrateUsage } from "./migrations.mjs";
+import {
+  migrateChannels,
+  migrateIndexes,
+  migrateUsage,
+} from "./migrations.mjs";
 import { migrateHubKeys } from "./hub-keys.mjs";
 import { registerWeb } from "./web.mjs";
 import cookie from "@fastify/cookie";
@@ -48,6 +52,7 @@ export async function createApp({
 } = {}) {
   const store = new Store(dir);
   bootstrap(store, dir);
+  migrateIndexes(store);
   migrateChannels(store);
   migrateUsage(store);
   migrateHubKeys(store);

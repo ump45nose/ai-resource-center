@@ -26,11 +26,11 @@ export function registerLegacy(app, { store, resources }) {
     authorize(req.auth);
     return callReport(store, req.query);
   });
-  app.get("/api/v1/rp/connections", (req) =>
-    rpChannels(store, req.auth)
-      .filter((c) => !isRemoved(c))
-      .map((c) => resources.publicChannel(c)),
-  );
+  app.get("/api/v1/rp/connections", (req) => {
+    const channels = rpChannels(store, req.auth).filter((c) => !isRemoved(c));
+    const data = resources.snapshot();
+    return channels.map((c) => resources.publicChannel(c, data));
+  });
   app.get("/api/v1/rp/:id/config", (req, reply) => {
     reply.header("Cache-Control", "no-store");
     const c = channel(req.auth, req.params.id);

@@ -5,6 +5,14 @@ import {
   usageOf,
 } from "./channel-rules.mjs";
 
+// Queries match these expressions verbatim; the planner only uses an index whose expression is identical.
+export function migrateIndexes(store) {
+  store.db.exec(`
+    CREATE INDEX IF NOT EXISTS events_date ON events(business_date);
+    CREATE INDEX IF NOT EXISTS entities_delivery ON entities(json_extract(data,'$.target'),json_extract(data,'$.revision')) WHERE kind='delivery';
+  `);
+}
+
 export function migrateUsage(store) {
   const key = "migration:channel-usage-v1";
   if (store.setting(key)) return;
