@@ -62,13 +62,25 @@ export class Store {
     );
   }
   transaction(fn) {
+    if (this.db.isTransaction)
+      try {
+        return fn();
+      } catch (error) {
+        this.aborted = error;
+        throw error;
+      }
     this.db.exec("BEGIN IMMEDIATE");
+    this.aborted = null;
     try {
       const result = fn();
+      // A nested failure dooms the whole transaction even if a caller caught it.
+      if (this.aborted) throw this.aborted;
       this.db.exec("COMMIT");
       return result;
     } catch (error) {
-      this.db.exec("ROLLBACK");
+      if (this.db.isTransaction) this.db.exec("ROLLBACK");
+      // Caches keyed by revision may hold rows from the rolled-back writes.
+      this.revision++;
       throw error;
     }
   }

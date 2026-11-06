@@ -242,9 +242,15 @@ export function ingestHubCredentials(resources, source, raw) {
       const previousKey = (account.hubKeys || []).find(
         (k) => k.source === source && k.externalId === externalId,
       );
+      const fingerprint = row.key && hash(row.key);
+      const sameKey = (c) =>
+        fingerprint &&
+        c?.credentialId &&
+        store.db
+          .prepare("SELECT fingerprint FROM credentials WHERE id=?")
+          .get(c.credentialId)?.fingerprint === fingerprint;
       const credentialId = row.key
-        ? row.key ===
-          (previousKey?.credentialId && store.reveal(previousKey.credentialId))
+        ? sameKey(previousKey)
           ? previousKey.credentialId
           : store.secret(row.key)
         : previousKey?.credentialId;
@@ -254,13 +260,6 @@ export function ingestHubCredentials(resources, source, raw) {
             previousKey?.credentialHeadersId,
           )
         : previousKey?.credentialHeadersId;
-      const fingerprint = row.key && hash(row.key);
-      const sameKey = (c) =>
-        fingerprint &&
-        c.credentialId &&
-        store.db
-          .prepare("SELECT fingerprint FROM credentials WHERE id=?")
-          .get(c.credentialId)?.fingerprint === fingerprint;
       const mapped = store.ref(source, "channel", externalId);
       let c = mapped && store.get("channel", mapped);
       if (c?.mergedInto) c = store.require("channel", c.mergedInto);
@@ -355,15 +354,15 @@ export function ingestHubCredentials(resources, source, raw) {
       saveHubKey(store, accountId, fact);
       account = store.require("account", accountId);
       if (c) {
-        const previous = c.credentialId && store.reveal(c.credentialId);
+        const same = sameKey(c);
         const selected =
           !c.curation &&
           c.source === source &&
           !!row.key &&
-          (row.key === previous ||
+          (same ||
             (!c.credentialId && p.credentials.length === 1) ||
             previousKey?.credentialId === c.credentialId);
-        const changed = selected && row.key !== previous;
+        const changed = selected && !same;
         store.put("channel", {
           ...c,
           ...(selected

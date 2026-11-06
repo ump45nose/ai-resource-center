@@ -3,7 +3,7 @@ import {
   entitlement,
   maintenanceStatus,
 } from "./maintenance-policy.mjs";
-export { defaults, policies, entitlement } from "./maintenance-policy.mjs";
+export { policies, entitlement } from "./maintenance-policy.mjs";
 import { randomUUID } from "node:crypto";
 import { Problem, publicValue } from "./errors.mjs";
 import { normalizeUrl, canonicalApi, dayKey } from "./domain.mjs";
@@ -18,6 +18,7 @@ import {
   capabilitiesOf,
   applicationsOf,
   isInternal,
+  isRemoved,
   validateTags,
   probeBlock,
   legacyTags,
@@ -27,9 +28,46 @@ import {
   archiveLabels,
 } from "./channel-rules.mjs";
 
-export const removed = (c) =>
-  c.availability === "已移除" || c.management?.state === "removed";
-export const purpose = (c) => c.category || "general";
+const purpose = (c) => c.category || "general";
+const knownModels = (c, scan, offerings) => [
+  ...new Set([
+    ...(c.models || []),
+    ...(c.hubObservation?.present !== false
+      ? c.hubObservation?.models || []
+      : []),
+    ...(c.sourceObservation?.present !== false
+      ? c.sourceObservation?.models || []
+      : []),
+    ...(scan?.catalogStatus === "ok" ? scan.catalogModels : []),
+    ...offerings.map((o) => o.modelId),
+  ]),
+];
+// Input is the public channel view, not the stored record.
+const activeModels = (c) =>
+  !c.enabled ||
+  c.runtimeEnabled === false ||
+  c.synchronization?.some(
+    (s) => s.target === "newapi" && s.state !== "applied",
+  ) ||
+  c.archiveReasons.length ||
+  c.recovery.pending ||
+  ["paused", "closed", "maintenance", "removed"].includes(
+    c.management?.state || "",
+  ) ||
+  c.management?.prohibited ||
+  c.credentialStatus === "missing" ||
+  (c.usage !== "rp" &&
+    c.runtimeEnabled == null &&
+    (c.sourceObservation?.present === false ||
+      c.sourceObservation?.enabled === false))
+    ? []
+    : [...new Set(c.models)].filter(
+        (id) =>
+          c.usage === "rp" ||
+          c.runtimeEnabled === true ||
+          !c.sourceObservation ||
+          c.sourceObservation.models?.includes(id),
+      );
 export function paginate(rows, { cursor = "0", limit = 50 } = {}) {
   const offset = Number(cursor),
     size = Number(limit);
@@ -56,10 +94,12 @@ export class Resources {
     this.store = store;
   }
   reconcileAccountState(accountIds = []) {
-    const linked = linkCheckinAccounts(this.store);
-    const archived = archiveDepletedAccounts(this.store, accountIds);
-    if (linked.length || archived.length) this.onChange?.();
-    return { linked, archived };
+    return this.store.transaction(() => {
+      const linked = linkCheckinAccounts(this.store);
+      const archived = archiveDepletedAccounts(this.store, accountIds);
+      if (linked.length || archived.length) this.onChange?.();
+      return { linked, archived };
+    });
   }
   site(input, source = "manual") {
     const url = normalizeUrl(input.websiteUrl || input.url);
@@ -145,170 +185,183 @@ export class Resources {
     });
   }
   update(kind, id, version, changes) {
-    const old = this.store.require(kind, id);
-    if (old.version !== version)
-      throw new Problem(
-        409,
-        "资料已被修改，请读取最新版本",
-        { currentVersion: old.version },
-        "version_conflict",
-      );
-    if (["site", "channel"].includes(kind))
-      changes.curation = {
-        ...old.curation,
-        authority: "center",
-        updatedAt: new Date().toISOString(),
-      };
-    if (kind === "account" && changes.benefit)
-      changes.benefit = { ...old.benefit, ...changes.benefit };
-    if (
-      kind === "account" &&
-      old.checkinAccountId &&
-      Object.hasOwn(changes, "checkinEnabled")
-    ) {
-      const executor = this.store.require("account", old.checkinAccountId);
-      this.store.update("account", executor.id, executor.version, {
-        checkinEnabled: changes.checkinEnabled,
-      });
-    }
-    if (kind === "channel" && changes.management)
-      changes.management = { ...old.management, ...changes.management };
-    if (kind === "channel") {
-      if (Object.hasOwn(changes, "headers"))
-        changes.headersManagedBy = "manual";
-      if (changes.tags) {
-        changes.tags = validateTags(changes.tags);
-        changes.tagHistory = [
-          ...(old.tagHistory || []),
-          {
-            tags: changes.tags,
-            source: "人工修改",
-            at: new Date().toISOString(),
-          },
-        ];
+    const saved = this.store.transaction(() => {
+      const old = this.store.require(kind, id);
+      if (old.version !== version)
+        throw new Problem(
+          409,
+          "资料已被修改，请读取最新版本",
+          { currentVersion: old.version },
+          "version_conflict",
+        );
+      if (["site", "channel"].includes(kind))
+        changes.curation = {
+          ...old.curation,
+          authority: "center",
+          updatedAt: new Date().toISOString(),
+        };
+      if (kind === "account" && changes.benefit)
+        changes.benefit = { ...old.benefit, ...changes.benefit };
+      if (
+        kind === "account" &&
+        old.checkinAccountId &&
+        Object.hasOwn(changes, "checkinEnabled")
+      ) {
+        const executor = this.store.require("account", old.checkinAccountId);
+        this.store.update("account", executor.id, executor.version, {
+          checkinEnabled: changes.checkinEnabled,
+        });
       }
-      const account = this.store.require(
-        "account",
-        changes.accountId || old.accountId,
-      );
-      if (changes.accountId && changes.accountId !== old.accountId) {
-        if (old.credentialId) {
-          const a = this.store.require("account", old.accountId);
-          this.store.put("account", {
-            ...a,
-            managedCredentials: [
-              ...(a.managedCredentials || []),
-              {
-                id: randomUUID(),
-                name: old.name,
-                credentialId: old.credentialId,
-              },
-            ],
-          });
+      if (kind === "channel" && changes.management)
+        changes.management = { ...old.management, ...changes.management };
+      if (kind === "channel") {
+        if (Object.hasOwn(changes, "headers"))
+          changes.headersManagedBy = "manual";
+        if (changes.tags) {
+          changes.tags = validateTags(changes.tags);
+          changes.tagHistory = [
+            ...(old.tagHistory || []),
+            {
+              tags: changes.tags,
+              source: "人工修改",
+              at: new Date().toISOString(),
+            },
+          ];
         }
-        changes.credentialId = null;
-        changes.nativeCredentialRef = null;
-        changes.credentialHeadersId = null;
-        changes.credentialState = "missing_key";
-        changes.connectionVersion = (old.connectionVersion || 1) + 1;
-      }
+        const account = this.store.require(
+          "account",
+          changes.accountId || old.accountId,
+        );
+        if (changes.accountId && changes.accountId !== old.accountId) {
+          if (old.credentialId) {
+            const a = this.store.require("account", old.accountId);
+            this.store.put("account", {
+              ...a,
+              managedCredentials: [
+                ...(a.managedCredentials || []),
+                {
+                  id: randomUUID(),
+                  name: old.name,
+                  credentialId: old.credentialId,
+                },
+              ],
+            });
+          }
+          changes.credentialId = null;
+          changes.nativeCredentialRef = null;
+          changes.credentialHeadersId = null;
+          changes.credentialState = "missing_key";
+          changes.connectionVersion = (old.connectionVersion || 1) + 1;
+        }
 
-      if (account.siteId !== (changes.siteId || old.siteId))
-        throw new Problem(400, "渠道账号不属于目标站点");
-      if (changes.baseUrl)
+        if (account.siteId !== (changes.siteId || old.siteId))
+          throw new Problem(400, "渠道账号不属于目标站点");
+        if (changes.baseUrl)
+          changes.baseUrl = canonicalApi(
+            changes.baseUrl,
+            changes.protocol || old.protocol,
+          );
+        if (
+          ["baseUrl", "protocol", "headers"].some(
+            (key) =>
+              Object.hasOwn(changes, key) &&
+              JSON.stringify(changes[key]) !==
+                JSON.stringify(
+                  old[key] || (key === "headers" ? [] : undefined),
+                ),
+          )
+        ) {
+          changes.connectionVersion = (old.connectionVersion || 1) + 1;
+          changes.connectionChangedAt = new Date().toISOString();
+          for (const o of this.store
+            .list("offering")
+            .filter((o) => o.channelId === id))
+            this.store.put("offering", { ...o, verification: null });
+        }
+      }
+      if (kind === "site" && changes.websiteUrl) {
+        changes.url = normalizeUrl(changes.websiteUrl);
+        delete changes.websiteUrl;
+      }
+      if (kind === "channel" && changes.purpose) {
+        changes.category = changes.purpose;
+        changes.usage ??= usageOf({
+          ...old,
+          usage: undefined,
+          category: changes.purpose,
+        });
+        changes.tags ??= validateTags([
+          ...tagsOf(old),
+          ...legacyTags({
+            category: changes.purpose,
+            client: changes.client || old.client,
+          }),
+        ]);
+        delete changes.purpose;
+      }
+      if (kind === "channel" && changes.usage)
+        changes.category =
+          changes.usage === "rp"
+            ? "rp"
+            : ["image", "video"].includes(changes.usage)
+              ? "media"
+              : "general";
+      if (kind === "channel" && Object.hasOwn(changes, "mode"))
+        changes.management = {
+          ...old.management,
+          ...changes.management,
+          manualOnly: changes.mode === "manual",
+        };
+      if (kind === "channel" && changes.baseUrl)
         changes.baseUrl = canonicalApi(
           changes.baseUrl,
-          changes.protocol || old.protocol,
+          changes.protocol || this.store.require(kind, id).protocol,
         );
-      if (
-        ["baseUrl", "protocol", "headers"].some(
-          (key) =>
-            Object.hasOwn(changes, key) &&
-            JSON.stringify(changes[key]) !==
-              JSON.stringify(old[key] || (key === "headers" ? [] : undefined)),
-        )
-      ) {
-        changes.connectionVersion = (old.connectionVersion || 1) + 1;
-        changes.connectionChangedAt = new Date().toISOString();
-        for (const o of this.store
-          .list("offering")
-          .filter((o) => o.channelId === id))
-          this.store.put("offering", { ...o, verification: null });
-      }
-    }
-    if (kind === "site" && changes.websiteUrl) {
-      changes.url = normalizeUrl(changes.websiteUrl);
-      delete changes.websiteUrl;
-    }
-    if (kind === "channel" && changes.purpose) {
-      changes.category = changes.purpose;
-      changes.usage ??= usageOf({
-        ...old,
-        usage: undefined,
-        category: changes.purpose,
-      });
-      changes.tags ??= validateTags([
-        ...tagsOf(old),
-        ...legacyTags({
-          category: changes.purpose,
-          client: changes.client || old.client,
-        }),
-      ]);
-      delete changes.purpose;
-    }
-    if (kind === "channel" && changes.usage)
-      changes.category =
-        changes.usage === "rp"
-          ? "rp"
-          : ["image", "video"].includes(changes.usage)
-            ? "media"
-            : "general";
-    if (kind === "channel" && Object.hasOwn(changes, "mode"))
-      changes.management = {
-        ...old.management,
-        ...changes.management,
-        manualOnly: changes.mode === "manual",
-      };
-    if (kind === "channel" && changes.baseUrl)
-      changes.baseUrl = canonicalApi(
-        changes.baseUrl,
-        changes.protocol || this.store.require(kind, id).protocol,
-      );
-    const saved = this.store.update(kind, id, version, changes);
-    if (kind === "account" && changes.checkinEnabled === false)
-      this.reconcileAccountState([id]);
-    this.onChange?.();
+      const saved = this.store.update(kind, id, version, changes);
+      if (kind === "account" && changes.checkinEnabled === false)
+        this.reconcileAccountState([id]);
+      this.onChange?.();
+      return saved;
+    });
     return kind === "channel" ? this.publicChannel(saved) : publicValue(saved);
   }
   saveCredential(id, version, key) {
-    const c = this.store.require("channel", id);
-    if (c.version !== version)
-      throw new Problem(409, "渠道已更新，请读取最新版本");
-    const credentialId = this.store.secret(key),
-      a = this.store.require("account", c.accountId);
-    this.store.put("account", {
-      ...a,
-      managedCredentials: [
-        ...(a.managedCredentials || []),
-        {
-          id: randomUUID(),
-          name: `${c.name} · ${new Date().toLocaleDateString("zh-CN")}`,
-          credentialId,
-          createdAt: new Date().toISOString(),
-        },
-      ],
+    const saved = this.store.transaction(() => {
+      const c = this.store.require("channel", id);
+      if (c.version !== version)
+        throw new Problem(
+          409,
+          "渠道已更新，请读取最新版本",
+          { currentVersion: c.version },
+          "version_conflict",
+        );
+      const credentialId = this.store.secret(key),
+        a = this.store.require("account", c.accountId);
+      this.store.put("account", {
+        ...a,
+        managedCredentials: [
+          ...(a.managedCredentials || []),
+          {
+            id: randomUUID(),
+            name: `${c.name} · ${new Date().toLocaleDateString("zh-CN")}`,
+            credentialId,
+            createdAt: new Date().toISOString(),
+          },
+        ],
+      });
+      for (const o of this.store
+        .list("offering")
+        .filter((o) => o.channelId === id))
+        this.store.put("offering", { ...o, verification: null });
+      const saved = this.store.update("channel", id, version, {
+        credentialId,
+        credentialState: "present",
+        credentialChangedAt: new Date().toISOString(),
+        connectionVersion: (c.connectionVersion || 1) + 1,
+      });
+      this.onChange?.();
+      return saved;
     });
-    for (const o of this.store
-      .list("offering")
-      .filter((o) => o.channelId === id))
-      this.store.put("offering", { ...o, verification: null });
-    const saved = this.store.update("channel", id, version, {
-      credentialId,
-      credentialState: "present",
-      credentialChangedAt: new Date().toISOString(),
-      connectionVersion: (c.connectionVersion || 1) + 1,
-    });
-    this.onChange?.();
     return this.publicChannel(saved);
   }
   credentialChoices(id) {
@@ -342,21 +395,30 @@ export class Resources {
     );
   }
   selectCredential(id, version, choiceId) {
-    const choice = this.credentialChoices(id).find((x) => x.id === choiceId);
-    if (!choice) throw new Problem(400, "请选择该账号已经保存的调用 key");
-    const c = this.store.require("channel", id);
-    if (c.version !== version) throw new Problem(409, "资料已更新，请重新读取");
-    for (const o of this.store
-      .list("offering")
-      .filter((o) => o.channelId === id))
-      this.store.put("offering", { ...o, verification: null });
-    const saved = this.store.update("channel", id, version, {
-      credentialId: choice.credentialId,
-      credentialState: "present",
-      credentialChangedAt: new Date().toISOString(),
-      connectionVersion: (c.connectionVersion || 1) + 1,
+    const saved = this.store.transaction(() => {
+      const choice = this.credentialChoices(id).find((x) => x.id === choiceId);
+      if (!choice) throw new Problem(400, "请选择该账号已经保存的调用 key");
+      const c = this.store.require("channel", id);
+      if (c.version !== version)
+        throw new Problem(
+          409,
+          "资料已更新，请重新读取",
+          { currentVersion: c.version },
+          "version_conflict",
+        );
+      for (const o of this.store
+        .list("offering")
+        .filter((o) => o.channelId === id))
+        this.store.put("offering", { ...o, verification: null });
+      const saved = this.store.update("channel", id, version, {
+        credentialId: choice.credentialId,
+        credentialState: "present",
+        credentialChangedAt: new Date().toISOString(),
+        connectionVersion: (c.connectionVersion || 1) + 1,
+      });
+      this.onChange?.();
+      return saved;
     });
-    this.onChange?.();
     return this.publicChannel(saved);
   }
   lifecycle(id, version, action, reason, note, recoveryEnabled) {
@@ -388,7 +450,7 @@ export class Resources {
         recoveryPolicy: { ...c.recoveryPolicy, enabled: false },
       };
     else if (action === "review") {
-      if (removed(c)) throw new Problem(409, "永久移除的渠道不能自动恢复");
+      if (isRemoved(c)) throw new Problem(409, "永久移除的渠道不能自动恢复");
       changes = {
         enabled: false,
         management: { ...c.management, state: "maintenance" },
@@ -439,7 +501,7 @@ export class Resources {
       )
       .get(c.id);
     const verification = data.offerings.filter((x) => x.channelId === c.id);
-    return {
+    const view = {
       ...publicValue(c),
       synchronization: this.distribution?.channelStatus(c.id) || [],
       runtimeEnabled: this.distribution?.runtimeEnabled(c) ?? null,
@@ -475,6 +537,11 @@ export class Resources {
       historicalEvaluations: this.evaluations(c.id, undefined, data),
       calls: stats,
       scan: this.scanObservation(c, data),
+    };
+    return {
+      ...view,
+      knownModels: knownModels(c, view.scan, verification),
+      activeModels: activeModels(view),
     };
   }
   scanObservation(c, data) {
@@ -567,7 +634,7 @@ export class Resources {
       websiteUrl: site.url,
       accounts,
       channels: data.channels
-        .filter((c) => c.siteId === id && !removed(c) && !isInternal(c))
+        .filter((c) => c.siteId === id && !isRemoved(c) && !isInternal(c))
         .map((c) => this.publicChannel(c, data)),
     };
   }
@@ -668,30 +735,15 @@ export class Resources {
     return paginate(rows, query);
   }
   models(query = {}) {
-    const data = this.snapshot(),
-      offerings = data.offerings;
+    const data = this.snapshot();
     const rows = data.channels
-      .filter((c) => !removed(c) && !isInternal(c) &&
+      .filter((c) => !isRemoved(c) && !isInternal(c) &&
         !this.store.get("site", c.siteId)?.resourceExcluded)
       .flatMap((c) => {
-        const scan = this.scanObservation(c, data);
-        const names = new Set([
-          ...(c.models || []),
-          ...(c.hubObservation?.present !== false
-            ? c.hubObservation?.models || []
-            : []),
-          ...(c.sourceObservation?.present !== false
-            ? c.sourceObservation?.models || []
-            : []),
-          ...(scan?.catalogStatus === "ok" ? scan.catalogModels : []),
-          ...offerings
-            .filter((o) => o.channelId === c.id)
-            .map((o) => o.modelId),
-        ]);
-        return [...names].map((modelId) => {
-          const o = offerings.find(
-            (o) => o.channelId === c.id && o.modelId === modelId,
-          );
+        const view = this.publicChannel(c, data),
+          active = new Set(view.activeModels);
+        return view.knownModels.map((modelId) => {
+          const o = view.modelAvailability.find((o) => o.modelId === modelId);
           return {
             channelId: c.id,
             siteId: c.siteId,
@@ -711,7 +763,8 @@ export class Resources {
               c.models ||
               []
             ).includes(modelId),
-            scan,
+            scan: view.scan,
+            active: active.has(modelId),
           };
         });
       })
@@ -735,7 +788,7 @@ export class Resources {
     const rows = [];
     for (const c of this.store
       .list("channel")
-      .filter((c) => !removed(c) && !isInternal(c) &&
+      .filter((c) => !isRemoved(c) && !isInternal(c) &&
         !this.store.get("site", c.siteId)?.resourceExcluded)) {
       const kind =
         !c.credentialId && !c.gateway && !c.nativeCredentialRef
@@ -774,7 +827,7 @@ export class Resources {
   overview() {
     const channels = this.store
       .list("channel")
-      .filter((c) => !removed(c) && !isInternal(c) &&
+      .filter((c) => !isRemoved(c) && !isInternal(c) &&
         !this.store.get("site", c.siteId)?.resourceExcluded);
     const accounts = this.store.list("account");
     return {
@@ -885,27 +938,10 @@ export class Resources {
         }
       } else
         for (const id of ids) {
-          const c = this.store.require("channel", id);
-          if (action === "purpose") {
-            this.update("channel", id, c.version, { purpose: category });
-            continue;
-          }
-          const change =
-            action === "pause"
-              ? {
-                  enabled: false,
-                  management: { ...c.management, state: "paused" },
-                }
-              : {
-                  availability: "已移除",
-                  enabled: false,
-                  management: { ...c.management, state: "removed" },
-                };
-          this.store.put("channel", {
-            ...c,
-            ...change,
-            version: c.version + 1,
-          });
+          const { version } = this.store.require("channel", id);
+          if (action === "purpose")
+            this.update("channel", id, version, { purpose: category });
+          else this.lifecycle(id, version, action);
         }
       const applied = {
         requestId,

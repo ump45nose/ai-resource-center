@@ -29,7 +29,7 @@ try {
     output,
     JSON.stringify(
       {
-        url: "http://192.168.31.201:18323",
+        url: process.env.ARC_PUBLIC_URL || "http://192.168.31.201:18323",
         token,
         role,
         sourceId,

@@ -1,4 +1,4 @@
-import { isRp } from "./channel-rules.mjs";
+import { rpChannels } from "./channel-rules.mjs";
 import { z } from "zod";
 import { Problem } from "./errors.mjs";
 import { canonicalApi, errorLabel } from "./domain.mjs";
@@ -47,16 +47,10 @@ const batchSchema = z
   .strict();
 
 export function ingestRpCalls(center, gateways, auth, body) {
-  const { device, events } = batchSchema.parse(body),
-    store = center.store;
-  const allowed = store
-    .list("channel")
-    .filter(
-      (c) =>
-        isRp(c) &&
-        (auth.role === "admin" || auth.scope.channelIds.includes(c.id)),
-    );
-  const source = auth.scope.sourceId || "sillytavern";
+  const store = center.store,
+    allowed = rpChannels(store, auth),
+    { device, events } = batchSchema.parse(body);
+  const source = auth.scope?.sourceId || "sillytavern";
   const acknowledgedIds = [];
   store.transaction(() => {
     for (const e of events) {

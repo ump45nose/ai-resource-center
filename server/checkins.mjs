@@ -8,7 +8,7 @@ import { confirmedCheckin } from "./checkin-health.mjs";
 
 const ZONE = "Asia/Taipei";
 
-export function dateRange(query = {}, now = new Date()) {
+function dateRange(query = {}, now = new Date()) {
   const today = dayKey(now, ZONE);
   const earliest = dayKey(new Date(now.getTime() - 29 * 86400000), ZONE);
   const start = query.start_date || earliest, end = query.end_date || today;
@@ -24,7 +24,7 @@ export function dateRange(query = {}, now = new Date()) {
 }
 
 // A cursor belongs to one query and one source snapshot. New events require a restart.
-export function checkinPage(rows, query, scope) {
+function checkinPage(rows, query, scope) {
   const limit = query.limit ?? 50;
   if (!Number.isInteger(limit) || limit < 1 || limit > 200)
     throw new Problem(400, "分页参数不合法");
@@ -71,7 +71,7 @@ function identities(store) {
   return { accounts, canonical, beneficiaries };
 }
 
-export function checkinRows(store, range, siteId) {
+function checkinRows(store, range, siteId) {
   if (siteId) store.require("site", siteId);
   const ids = identities(store), sites = new Map(store.list("site").map((s) => [s.id, s]));
   const groups = new Map();

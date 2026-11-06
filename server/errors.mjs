@@ -5,11 +5,6 @@ export class Problem extends Error {
   }
 }
 
-export function requireValue(value, message = "对象不存在") {
-  if (!value) throw new Problem(404, message);
-  return value;
-}
-
 export function publicValue(value) {
   if (Array.isArray(value)) return value.map(publicValue);
   if (!value || typeof value !== "object") return value;
@@ -40,7 +35,10 @@ export function publicValue(value) {
 }
 
 export function errorMessage(error) {
-  return String(error.message || error)
-    .replace(/\bsk-[\w-]+/g, "[凭据已隐藏]")
-    .slice(0, 400);
+  const text = Array.isArray(error?.issues)
+    ? `参数不正确：${error.issues
+        .map((i) => (i.path?.length ? `${i.path.join(".")}：` : "") + i.message)
+        .join("；")}`
+    : String(error.message || error);
+  return text.replace(/\bsk-[\w-]+/g, "[凭据已隐藏]").slice(0, 400);
 }

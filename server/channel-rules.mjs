@@ -118,6 +118,17 @@ export const isRp = (c) => usageOf(c) === "rp";
 export const isRemoved = (c) =>
   c.availability === "已移除" || c.management?.state === "removed";
 export const isInternal = (c) => c.internal === true;
+export function rpChannels(store, auth) {
+  if (!["admin", "rp"].includes(auth.role))
+    throw new Problem(403, "RP 连接未授权");
+  return store
+    .list("channel")
+    .filter(
+      (c) =>
+        isRp(c) &&
+        (auth.role === "admin" || auth.scope?.channelIds?.includes(c.id)),
+    );
+}
 
 export function validateTags(tags) {
   if (tags.some((tag) => !Object.hasOwn(tagLabels, tag)))

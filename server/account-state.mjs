@@ -9,7 +9,7 @@ import { currentBalance, entitlement } from "./maintenance-policy.mjs";
 import { archiveChannel } from "./channel-health.mjs";
 import { observeSuccess } from "./failure-window.mjs";
 
-export function checkinAccount(store, account) {
+function checkinAccount(store, account) {
   return account.checkinAccountId
     ? store.require("account", account.checkinAccountId)
     : account;

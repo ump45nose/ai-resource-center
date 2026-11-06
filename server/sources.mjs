@@ -70,7 +70,12 @@ export class Sources {
     const rows = this.store.setting("sources") || [],
       old = id && this.get(id);
     if (old && old.version !== version)
-      throw new Problem(409, "来源已更新", { currentVersion: old.version });
+      throw new Problem(
+        409,
+        "来源已更新",
+        { currentVersion: old.version },
+        "version_conflict",
+      );
     const source = {
       enabled: true,
       syncEnabled: false,

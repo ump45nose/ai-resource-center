@@ -29,127 +29,140 @@ function references(value, from, to, field = "") {
 }
 
 function rebind(store, kind, from, to) {
-  for (const row of store.db
-    .prepare("SELECT kind,id,data,version FROM entities")
-    .all()) {
-    if (row.kind === kind && row.id === from) continue;
-    const before = JSON.parse(row.data),
-      after = references(before, from, to);
-    if (JSON.stringify(before) !== JSON.stringify(after))
-      store.put(row.kind, { ...after, id: row.id, version: row.version });
-  }
-  store.db
-    .prepare("UPDATE refs SET id=? WHERE kind=? AND id=?")
-    .run(to, kind, from);
-  if (kind === "channel")
+  store.transaction(() => {
+    for (const row of store.db
+      .prepare("SELECT kind,id,data,version FROM entities")
+      .all()) {
+      if (row.kind === kind && row.id === from) continue;
+      const before = JSON.parse(row.data),
+        after = references(before, from, to);
+      if (JSON.stringify(before) !== JSON.stringify(after))
+        store.put(row.kind, { ...after, id: row.id, version: row.version });
+    }
     store.db
-      .prepare("UPDATE calls SET channel_id=? WHERE channel_id=?")
+      .prepare("UPDATE refs SET id=? WHERE kind=? AND id=?")
+      .run(to, kind, from);
+    if (kind === "channel")
+      store.db
+        .prepare("UPDATE calls SET channel_id=? WHERE channel_id=?")
+        .run(to, from);
+    if (kind === "account")
+      store.db
+        .prepare("UPDATE events SET account_id=? WHERE account_id=?")
+        .run(to, from);
+    store.db
+      .prepare("UPDATE actions SET target=? WHERE target=?")
       .run(to, from);
-  if (kind === "account")
-    store.db
-      .prepare("UPDATE events SET account_id=? WHERE account_id=?")
-      .run(to, from);
-  store.db.prepare("UPDATE actions SET target=? WHERE target=?").run(to, from);
-  for (const auth of store.db
-    .prepare("SELECT token_hash,scope FROM auth")
-    .all()) {
-    const after = references(JSON.parse(auth.scope), from, to);
-    store.db
-      .prepare("UPDATE auth SET scope=? WHERE token_hash=?")
-      .run(JSON.stringify(after), auth.token_hash);
-  }
+    for (const auth of store.db
+      .prepare("SELECT token_hash,scope FROM auth")
+      .all()) {
+      const after = references(JSON.parse(auth.scope), from, to);
+      store.db
+        .prepare("UPDATE auth SET scope=? WHERE token_hash=?")
+        .run(JSON.stringify(after), auth.token_hash);
+    }
+  });
 }
 
-export function mergeAccount(store, from, to) {
+function mergeAccount(store, from, to) {
   if (from === to) return;
-  const old = store.require("account", from),
-    keep = store.require("account", to);
-  const latest = [keep, old]
-    .filter((a) => a.balance != null)
-    .sort(
-      (a, b) => Date.parse(b.confirmedAt || 0) - Date.parse(a.confirmedAt || 0),
-    )[0];
-  rebind(store, "account", from, to);
-  store.put("account", {
-    ...keep,
-    ...(!keep.sourceObservation && old.sourceObservation
-      ? { sourceObservation: old.sourceObservation }
-      : {}),
-    ...(!keep.keySync && old.keySync ? { keySync: old.keySync } : {}),
-    ...(latest
-      ? {
-          balance: latest.balance,
-          unit: latest.unit,
-          confirmedAt: latest.confirmedAt,
-        }
-      : {}),
-    hubKeys: dedupe(
-      [...(old.hubKeys || []), ...(keep.hubKeys || [])],
-      hubKeyId,
-    ),
-    mergedFrom: [...new Set([...(keep.mergedFrom || []), from])],
+  store.transaction(() => {
+    const old = store.require("account", from),
+      keep = store.require("account", to);
+    const latest = [keep, old]
+      .filter((a) => a.balance != null)
+      .sort(
+        (a, b) =>
+          Date.parse(b.confirmedAt || 0) - Date.parse(a.confirmedAt || 0),
+      )[0];
+    rebind(store, "account", from, to);
+    store.put("account", {
+      ...keep,
+      ...(!keep.sourceObservation && old.sourceObservation
+        ? { sourceObservation: old.sourceObservation }
+        : {}),
+      ...(!keep.keySync && old.keySync ? { keySync: old.keySync } : {}),
+      ...(latest
+        ? {
+            balance: latest.balance,
+            unit: latest.unit,
+            confirmedAt: latest.confirmedAt,
+          }
+        : {}),
+      hubKeys: dedupe(
+        [...(old.hubKeys || []), ...(keep.hubKeys || [])],
+        hubKeyId,
+      ),
+      mergedFrom: [...new Set([...(keep.mergedFrom || []), from])],
+    });
+    store.put("account", { ...old, mergedInto: to, version: old.version + 1 });
   });
-  store.put("account", { ...old, mergedInto: to, version: old.version + 1 });
 }
 
 function mergeChannel(store, from, to, mergePool = false) {
   if (from === to) return;
-  let old = store.require("channel", from),
+  store.transaction(() => {
+    let old = store.require("channel", from),
+      keep = store.require("channel", to);
+    if (mergePool && old.accountId !== keep.accountId)
+      mergeAccount(store, old.accountId, keep.accountId);
+    rebind(store, "channel", from, to);
     keep = store.require("channel", to);
-  if (mergePool && old.accountId !== keep.accountId)
-    mergeAccount(store, old.accountId, keep.accountId);
-  rebind(store, "channel", from, to);
-  keep = store.require("channel", to);
-  const relatedGateways = dedupe(
-    [
-      ...(keep.relatedGateways || []),
-      ...(old.relatedGateways || []),
-      ...(old.gateway ? [old.gateway] : []),
-    ],
-    (g) => `${g.sourceId}:${g.channelId ?? g.provider}`,
-  ).filter((g) => JSON.stringify(g) !== JSON.stringify(keep.gateway));
-  store.put("channel", {
-    ...keep,
-    ...(!keep.credentialId && old.credentialId
-      ? {
-          credentialId: old.credentialId,
-          credentialHeadersId: old.credentialHeadersId,
-          hubObservation: old.hubObservation,
-        }
-      : {}),
-    relatedGateways,
-    mergedFrom: [...new Set([...(keep.mergedFrom || []), from])],
-    version: keep.version + 1,
-  });
-  store.put("channel", {
-    ...old,
-    mergedInto: to,
-    enabled: false,
-    availability: "已移除",
-    management: { ...old.management, state: "removed" },
-    version: old.version + 1,
+    const relatedGateways = dedupe(
+      [
+        ...(keep.relatedGateways || []),
+        ...(old.relatedGateways || []),
+        ...(old.gateway ? [old.gateway] : []),
+      ],
+      (g) => `${g.sourceId}:${g.channelId ?? g.provider}`,
+    ).filter((g) => JSON.stringify(g) !== JSON.stringify(keep.gateway));
+    store.put("channel", {
+      ...keep,
+      ...(!keep.credentialId && old.credentialId
+        ? {
+            credentialId: old.credentialId,
+            credentialHeadersId: old.credentialHeadersId,
+            hubObservation: old.hubObservation,
+          }
+        : {}),
+      relatedGateways,
+      mergedFrom: [...new Set([...(keep.mergedFrom || []), from])],
+      version: keep.version + 1,
+    });
+    store.put("channel", {
+      ...old,
+      mergedInto: to,
+      enabled: false,
+      availability: "已移除",
+      management: { ...old.management, state: "removed" },
+      version: old.version + 1,
+    });
   });
 }
 
 function mergeSite(store, from, to) {
-  const old = store.require("site", from),
-    keep = store.require("site", to);
-  rebind(store, "site", from, to);
-  store.put("site", {
-    ...keep,
-    aliases: [
-      ...new Set([...(keep.aliases || []), old.url, ...(old.aliases || [])]),
-    ].filter((u) => u !== keep.url),
-    sources: [...new Set([...(keep.sources || []), ...(old.sources || [])])],
-    checkinUrl: keep.checkinUrl || old.checkinUrl,
-    mergedFrom: [...new Set([...(keep.mergedFrom || []), from])],
-    version: keep.version + 1,
-  });
-  store.put("site", {
-    ...old,
-    mergedInto: to,
-    removed: true,
-    version: old.version + 1,
+  store.transaction(() => {
+    const old = store.require("site", from),
+      keep = store.require("site", to);
+    rebind(store, "site", from, to);
+    store.put("site", {
+      ...keep,
+      aliases: [
+        ...new Set([...(keep.aliases || []), old.url, ...(old.aliases || [])]),
+      ].filter((u) => u !== keep.url),
+      sources: [
+        ...new Set([...(keep.sources || []), ...(old.sources || [])]),
+      ],
+      checkinUrl: keep.checkinUrl || old.checkinUrl,
+      mergedFrom: [...new Set([...(keep.mergedFrom || []), from])],
+      version: keep.version + 1,
+    });
+    store.put("site", {
+      ...old,
+      mergedInto: to,
+      removed: true,
+      version: old.version + 1,
+    });
   });
 }
 

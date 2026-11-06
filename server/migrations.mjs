@@ -16,21 +16,21 @@ export function migrateUsage(store) {
 }
 
 export function migrateChannels(store) {
-  for (const site of store.list("site")) {
-    if (site.websiteObservation || site.siteDown === undefined) continue;
-    store.put("site", {
-      ...site,
-      websiteObservation: {
-        status: site.siteDown ? "unreachable" : "reachable",
-        observedAt: site.reachabilityObservedAt || null,
-        source: "legacy",
-      },
-    });
-  }
   const key = "migration:channel-tags-v1";
-  if (store.setting(key)) return;
-  const counts = { channels: 0, failed: 0, removed: 0, tagged: 0 };
   store.transaction(() => {
+    for (const site of store.list("site")) {
+      if (site.websiteObservation || site.siteDown === undefined) continue;
+      store.put("site", {
+        ...site,
+        websiteObservation: {
+          status: site.siteDown ? "unreachable" : "reachable",
+          observedAt: site.reachabilityObservedAt || null,
+          source: "legacy",
+        },
+      });
+    }
+    if (store.setting(key)) return;
+    const counts = { channels: 0, failed: 0, removed: 0, tagged: 0 };
     for (const c of store.list("channel")) {
       const tags = c.tags ?? legacyTags(c);
       const state = isRemoved(c)

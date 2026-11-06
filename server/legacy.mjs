@@ -1,4 +1,4 @@
-import { isRp, isRemoved, channelHeaders } from "./channel-rules.mjs";
+import { isRemoved, channelHeaders, rpChannels } from "./channel-rules.mjs";
 import { z } from "zod";
 import { Problem } from "./errors.mjs";
 import { authorize } from "./auth.mjs";
@@ -8,19 +8,8 @@ import { recordCall } from "./ingest.mjs";
 import { callReport } from "./calls.mjs";
 
 export function registerLegacy(app, { store, resources }) {
-  const allowed = (auth) => {
-    if (!["admin", "rp"].includes(auth.role))
-      throw new Problem(403, "RP 连接未授权");
-    return store
-      .list("channel")
-      .filter(
-        (c) =>
-          isRp(c) &&
-          (auth.role === "admin" || auth.scope.channelIds?.includes(c.id)),
-      );
-  };
   const channel = (auth, id) => {
-    const c = allowed(auth).find((c) => c.id === id);
+    const c = rpChannels(store, auth).find((c) => c.id === id);
     if (!c) throw new Problem(403, "RP 连接未授权");
     return c;
   };
@@ -38,7 +27,7 @@ export function registerLegacy(app, { store, resources }) {
     return callReport(store, req.query);
   });
   app.get("/api/v1/rp/connections", (req) =>
-    allowed(req.auth)
+    rpChannels(store, req.auth)
       .filter((c) => !isRemoved(c))
       .map((c) => resources.publicChannel(c)),
   );
@@ -51,15 +40,9 @@ export function registerLegacy(app, { store, resources }) {
       headers: channelHeaders(store, c),
     };
   });
-  app.post("/api/v1/rp/calls", (req) => {
-    allowed(req.auth);
-    return ingestRpCalls(
-      { store, recompute() {} },
-      callAdapter,
-      req.auth,
-      req.body,
-    );
-  });
+  app.post("/api/v1/rp/calls", (req) =>
+    ingestRpCalls({ store, recompute() {} }, callAdapter, req.auth, req.body),
+  );
   app.post("/api/v1/rp/:id/saved", (req) => {
     const old = channel(req.auth, req.params.id);
     const p = z
