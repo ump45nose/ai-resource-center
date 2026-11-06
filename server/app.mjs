@@ -25,6 +25,7 @@ import {
 } from "./auth.mjs";
 import { Problem, publicValue, errorMessage } from "./errors.mjs";
 import { ingestAccounts } from "./ingest.mjs";
+import { checkinExecutionPolicy } from "./checkin-health.mjs";
 import { ingestHubInventory, ingestHubCredentials } from "./hub-ingest.mjs";
 import { mcpRequest } from "./mcp.mjs";
 import { registerLegacy } from "./legacy.mjs";
@@ -417,6 +418,10 @@ export async function createApp({
     if (!source || !Array.isArray(req.body.events))
       throw new Problem(400, "缺少来源和事件");
     return ingestAccounts(resources, source, req.body.events);
+  });
+  app.get("/api/v2/ingest/checkin-policy", (req, reply) => {
+    reply.header("Cache-Control", "no-store");
+    return checkinExecutionPolicy(store, sourceIdentity(req.auth));
   });
   app.post("/api/v2/ingest/inventory", (req) =>
     ingestHubInventory(resources, sourceIdentity(req.auth), req.body),

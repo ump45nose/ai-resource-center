@@ -130,6 +130,8 @@ const policyFields = {
   closedHours: z.number().min(1),
   keyRetryHours: z.number().min(1),
   newModelsHours: z.number().min(1),
+  archiveAfterDays: z.number().int().min(1).max(365),
+  archiveReviewHours: z.number().int().min(24).max(8760),
   scanConcurrency: z.number().int().min(1).max(5),
   unstableSuccesses: z.number().int().min(2).max(10),
   maxCandidates: z.number().int().min(1).max(20),

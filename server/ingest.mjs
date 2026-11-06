@@ -1,4 +1,5 @@
 import { reconcileCheckinBalances } from "./account-state.mjs";
+import { observeCheckinHealth } from "./checkin-health.mjs";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { dayKey, nextReset } from "./domain.mjs";
@@ -121,6 +122,7 @@ export function ingestAccounts(resources, source, events) {
           JSON.stringify({ ...e, source }),
         );
       acknowledgedIds.push(e.eventId);
+      if (e.kind === "checkin") observeCheckinHealth(store, account.id, e);
     }
     store.setting(`received:${source}`, new Date().toISOString());
     return { acknowledgedIds };
