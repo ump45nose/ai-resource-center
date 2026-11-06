@@ -37,7 +37,7 @@ WebUI 提供可直接打开的站点、模型筛选和运行记录链接，Hub �
 | 对象 | 关键字段与含义 |
 | --- | --- |
 | Site | `id, name, websiteUrl, checkinUrl, aliases, sources, pinned, version`；站点统一入口，保留独立签到地址；置顶属于用户管理资料 |
-| Account | `id, siteId, name, sourceRefs, balances, checkin, entitlements, version`；余额和签到归账号 |
+| Account | `id, siteId, name, sourceRefs, balances, checkin, entitlements, version`；余额和签到归账号。`checkinToday` 是服务端计算的当日签到状态（`state, label, tone, detail, basis, reason, method, confirmedAt, businessDate, timezone`），站点接口与概览 `daily.accounts[]` 返回同一结果，各入口不自行推算 |
 | Channel | `id, siteId, accountId, capabilities, tags, baseUrl, protocol, models, knownModels, activeModels, credentialStatus, clientRequirements, management, recovery, version`；一份渠道资料可被多个应用使用，凭据不返回明文。`knownModels` 汇总配置、来源观察、目录扫描和验证记录中的模型；`activeModels` 是当前已生效的模型，两者均由服务计算 |
 | ApplicationBinding | `id, channelId, application, instanceId, nativeId, modelId, overrides, enabled, order, version`；保存各应用选定模型和连接设置，多个绑定不改变共享模型目录 |
 | ModelAvailability | `channelId, modelId, group, capabilityClass, catalog, stationMetrics, verification, recentCalls`；分组、目录、站方统计和自己的实测分开 |
@@ -72,7 +72,7 @@ WebUI 提供可直接打开的站点、模型筛选和运行记录链接，Hub �
 
 | 使用动作 | HTTP | MCP | 主要输入／结果 |
 | --- | --- | --- | --- |
-| 看今日资源 | `GET /overview` | `resource_overview` | 日期、时区；可用资源摘要、当日权益、签到及待办摘要 |
+| 看今日资源 | `GET /overview` | `resource_overview` | 日期、时区；可用资源摘要、当日权益、签到及待办摘要。签到计数由各账号的 `checkinToday` 汇总，无需签到的账号计入 `notNeeded`，不算未确认或失败 |
 | 找站点 | `GET /sites` | `resource_list_sites` | `q, capability, tag, application, status, recoveryState, cursor`；按站点聚合，不按来源重复行 |
 | 看完整站点 | `GET /sites/{id}` | `resource_get_site` | 账号、渠道、签到入口、规则、最新结果和来源 |
 | 找可用模型 | `GET /models` | `resource_list_models` | `q, capabilityClass, capability, tag, application, availability`；模型及对应渠道，每行的 `active` 与渠道 `activeModels` 使用同一规则 |
@@ -155,7 +155,7 @@ MCP 提供管理动作，不提供任意 shell、任意 URL 请求或凭据导�
 业务载荷要点：
 
 - 账号观察：来源账号 ID、站点与签到地址、余额单位和观察时间。
-- 签到：账号、业务日期、时区、执行方式、结果、原因及已确认奖励；未确认奖励为空。
+- 签到：账号、业务日期、时区、执行方式、结果、原因及已确认奖励；未确认奖励为空。结果 `无需签到` 与余额门槛、站点暂不允许签到、无可用签到方式等原因表示当日无需签到，不计入失败或连续失败归档。
 - 调用／任务结果：任务与运行 ID、实际渠道模型、请求关联、终态、错误分类及耗时；任务质量结论与执行成功分开。不发送提示词或完整输出。
 - RP 保存：实例、原生连接 ID、中心连接 ID（首次可缺）、中心基线版本、本地保存版本、变更字段；敏感凭据经受限配置通道传递。
 

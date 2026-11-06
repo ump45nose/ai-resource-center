@@ -67,6 +67,17 @@ Personal Hub 的只读接入复用 `read` 凭据和已有概览、站点、来�
 签到摘要的 `expected` 是自动签到配置与当日实际观察账号的并集，
 `automaticExpected` 单列自动签到账号数；当日人工签到也计入成果，汇总分母保持一致。
 
+账号当日签到状态只在服务端计算：`daily.accounts[].checkinToday` 与站点接口各账号的
+`checkinToday`（含 `checkinAccount`）是同一结果，WebUI 直接展示。`state` 为
+`done/not_needed/action_required/failed/pending/not_applicable`，`basis` 标明依据：
+签到记录 `event`、站点状态 `site_status`、插件人工标记 `manual_mark`、设置 `settings`、尚无记录 `none`。
+每个账号按签到记录的时区取当前业务日（缺省为签到账号的重置时区，再缺省 Asia/Taipei），
+`daily.date` 仍按 Asia/Taipei。`expected = completed + failed + unconfirmed + notNeeded + notObserved`：
+站点状态或人工标记显示今日已签到也计入 `completed`，对应 `items` 的 `method` 为“站点状态”或“人工标记”；
+余额高于门槛、站点暂不允许签到、无可用签到方式时无需签到，自动签到账号计入新增的 `notNeeded`，
+均不列入 `items`、`unconfirmed` 或 `failed`；需登录、需人工操作仍计入 `failed` 并生成 `interventions`。
+`items` 另含 `state/basis/label`。
+
 `GET /api/v2/checkins`（MCP `resource_list_checkins`）接受
 `start_date,end_date,siteId,cursor,limit`，默认最近 30 个业务日、Asia/Taipei，
 分页默认 50、最大 200。返回 `items,nextCursor,coverage`。同账号、同业务日仅一行；

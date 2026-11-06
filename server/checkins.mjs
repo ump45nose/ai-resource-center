@@ -4,9 +4,14 @@ import { dayKey } from "./domain.mjs";
 import { Problem } from "./errors.mjs";
 import { entitlement, verified } from "./maintenance-policy.mjs";
 import { isInternal, isRemoved } from "./channel-rules.mjs";
-import { confirmedCheckin } from "./checkin-health.mjs";
+import { confirmedCheckin, checkinNotDue } from "./checkin-health.mjs";
 
 const ZONE = "Asia/Taipei";
+const CHECKINS =
+  "SELECT id,account_id,occurred_at,business_date,data FROM events WHERE business_date>=? AND business_date<=? AND json_extract(data,'$.kind')='checkin'";
+const NEWEST = " ORDER BY occurred_at DESC,id DESC";
+const shift = (day, days) =>
+  new Date(Date.parse(`${day}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
 
 function dateRange(query = {}, now = new Date()) {
   const today = dayKey(now, ZONE);
@@ -49,8 +54,8 @@ function checkinPage(rows, query, scope) {
   };
 }
 
-function identities(store) {
-  const accounts = new Map(store.list("account").map((a) => [a.id, a]));
+function identities(store, list = store.list("account")) {
+  const accounts = new Map(list.map((a) => [a.id, a]));
   const beneficiaries = new Map();
   const canonical = (id) => {
     const seen = new Set();
@@ -71,54 +76,60 @@ function identities(store) {
   return { accounts, canonical, beneficiaries };
 }
 
-function checkinRows(store, range, siteId) {
-  if (siteId) store.require("site", siteId);
-  const ids = identities(store), sites = new Map(store.list("site").map((s) => [s.id, s]));
-  const groups = new Map();
-  let unresolved = 0;
-  const events = store.db.prepare(
-    "SELECT id,account_id,occurred_at,business_date,data FROM events WHERE business_date>=? AND business_date<=? AND json_extract(data,'$.kind')='checkin' ORDER BY occurred_at DESC,id DESC",
-  ).all(range.start, range.end);
+// One row per business date and beneficiary; each group lists its newest event first.
+function groupCheckins(ids, sites, events) {
+  const groups = new Map(), unresolved = [];
   for (const row of events) {
     const executor = ids.canonical(row.account_id);
     const links = executor && ids.beneficiaries.get(executor.id);
     const account = links?.length === 1 ? links[0] : executor;
-    if (!account || links?.length > 1 || !sites.has(account.siteId)) { unresolved++; continue; }
-    if (siteId && account.siteId !== siteId) continue;
-    const event = JSON.parse(row.data);
+    if (!account || links?.length > 1 || !sites.has(account.siteId)) { unresolved.push(row); continue; }
+    const event = { ...JSON.parse(row.data), occurredAt: row.occurred_at };
     // The API account's disabled built-in check-in is not the separate worker's result.
     if (account.checkinAccountId && executor.id === account.id &&
         event.reason === "auto_checkin_disabled") continue;
     const key = `${row.business_date}:${account.id}`;
     let group = groups.get(key);
     if (!group) {
-      group = {
+      group = { events: [], row: {
         id: key, accountId: account.id, executorAccountId: executor.id,
         accountName: account.name || account.id, siteId: account.siteId,
         siteName: sites.get(account.siteId).name, businessDate: row.business_date,
         timezone: event.timezone || ZONE, occurredAt: row.occurred_at,
         latestResult: event.result || "待确认", reason: event.reason || null,
         method: event.method || null, confirmed: false, confirmedAt: null,
-        applicable: !executor.checkinArchive?.active &&
-          !["account_disabled", "auto_checkin_disabled", "center_archived", "no_provider", "no_selected_method"].includes(event.reason),
+        applicable: !executor.checkinArchive?.active && checkinNotDue(event) !== "skipped",
         rewardText: null, reward: null,
-      };
+      } };
       groups.set(key, group);
     }
+    group.events.push(event);
     if (confirmedCheckin(event)) {
-      group.confirmed = true;
-      group.confirmedAt ||= row.occurred_at;
-      group.rewardText ||= event.reward || null;
+      group.row.confirmed = true;
+      group.row.confirmedAt ||= row.occurred_at;
+      group.row.rewardText ||= event.reward || null;
     }
   }
-  const bounds = store.db.prepare(
-    "SELECT min(business_date) first,max(business_date) last FROM events WHERE json_extract(data,'$.kind')='checkin'",
-  ).get();
+  return { groups: [...groups.values()], unresolved };
+}
+
+const recorded = (store) => store.db.prepare(
+  "SELECT min(business_date) first,max(business_date) last FROM events WHERE json_extract(data,'$.kind')='checkin'",
+).get();
+const newestRow = (a, b) => b.businessDate.localeCompare(a.businessDate) ||
+  b.occurredAt.localeCompare(a.occurredAt) || a.id.localeCompare(b.id);
+
+function checkinRows(store, range, siteId) {
+  if (siteId) store.require("site", siteId);
+  const ids = identities(store), sites = new Map(store.list("site").map((s) => [s.id, s]));
+  const { groups, unresolved } = groupCheckins(ids, sites,
+    store.db.prepare(CHECKINS + NEWEST).all(range.start, range.end));
+  const bounds = recorded(store);
   return {
-    rows: [...groups.values()].sort((a, b) => b.businessDate.localeCompare(a.businessDate) || b.occurredAt.localeCompare(a.occurredAt) || a.id.localeCompare(b.id)),
+    rows: groups.map((g) => g.row).filter((r) => !siteId || r.siteId === siteId).sort(newestRow),
     coverage: { startDate: range.start, endDate: range.end, timezone: range.timezone,
       firstRecordedDate: bounds.first, lastRecordedDate: bounds.last,
-      complete: false, unresolvedAccounts: unresolved,
+      complete: false, unresolvedAccounts: unresolved.length,
       basis: "仅包含来源已接收的签到记录；缺失日期不表示未签到或收益为零" },
   };
 }
@@ -128,38 +139,198 @@ export function listCheckins(store, query = {}, now = new Date()) {
   return { ...checkinPage(rows, query, [range, query.siteId || null]), coverage };
 }
 
+const reasonLabels = {
+  account_disabled: "插件账号已停用",
+  auto_checkin_disabled: "插件自动签到已关闭",
+  detection_disabled: "签到检测已关闭",
+  center_archived: "中心已暂停签到",
+  no_provider: "站点类型不支持签到",
+  no_selected_method: "未配置签到方式",
+  balance_threshold: "未达签到门槛",
+  method_disabled: "站点暂不允许签到",
+  no_available_method: "无可用签到方式",
+  status_unavailable: "签到状态读取失败",
+  checkin_unconfirmed: "执行未确认",
+  authentication_required: "签到站需登录",
+  identity_mismatch: "签到账号不一致",
+  manual_verification_required: "需要人工验证",
+  cancelled: "签到已取消",
+};
+const automaticMethods = ["自动签到", "自动重试"];
+
+function zoneOf(...zones) {
+  for (const zone of zones.filter(Boolean)) {
+    try {
+      dayKey(0, zone);
+      return zone;
+    } catch {}
+  }
+  return ZONE;
+}
+
+// Precedence: disabled account, then any completion (event, site status, manual
+// mark), archive, today's newest due event unless a later site status says no
+// check-in is possible, and finally the automation settings.
+function checkinStatus({ account, executor, shared, group, automatic, timezone, businessDate }) {
+  const make = (state, label, tone, detail, basis, more) => ({
+    state, label, tone, detail, basis, reason: null, method: null, confirmedAt: null,
+    businessDate, timezone, ...more,
+  });
+  if (account.enabled === false)
+    return make("not_applicable", "账号已停用", "neutral", "中心已停用此账号", "settings");
+  const confirmed = group?.events.find(confirmedCheckin);
+  if (confirmed)
+    return make("done",
+      confirmed.result === "成功" && automaticMethods.includes(confirmed.method) ? "已自动签到" : "今日已签到",
+      "green", "今日签到完成", "event",
+      { reason: confirmed.reason || null, method: confirmed.method || null, confirmedAt: group.row.confirmedAt });
+  const observation = !shared && executor.sourceObservation?.present !== false
+    ? executor.sourceObservation : null;
+  const facts = observation?.checkin;
+  const day = (at) => (Number.isFinite(Date.parse(at)) ? dayKey(at, timezone) : null);
+  const statusToday = !!facts && day(facts.statusObservedAt) === businessDate;
+  if (statusToday && facts.isCheckedInToday === true)
+    return make("done", "今日已签到", "green", "站点状态显示今日已签到", "site_status",
+      { method: "站点状态", confirmedAt: facts.statusObservedAt });
+  if (facts && facts.isCheckedInToday !== false && (facts.lastCheckInDate === businessDate ||
+      (day(observation.observedAt) === businessDate && facts.isCheckedInToday === true)))
+    return make("done", "已标记签到", "green", "插件中的人工标记，不是执行结果", "manual_mark",
+      { method: "人工标记", confirmedAt: observation.observedAt || null });
+  if (executor.checkinArchive?.active)
+    return make("not_applicable", "签到已归档", "amber",
+      `${executor.checkinArchive.label || "持续失败"}，等待复查`, "settings", { reason: "center_archived" });
+  const threshold = executor.benefit?.threshold || account.benefit?.threshold;
+  const notNeeded = (reason, basis, more) => make("not_needed", reasonLabels[reason] || "无需签到", "neutral",
+    reason === "balance_threshold" ? (threshold ? String(threshold) : "余额充足，暂不符合签到条件") : "今日无需签到",
+    basis, { reason, ...more });
+  const latest = group?.events[0], due = latest && checkinNotDue(latest), reason = latest?.reason || null;
+  const closed = statusToday && (facts.ineligibleReason === "balance_threshold" ? "balance_threshold"
+    : facts.availability === "disabled" ? "method_disabled" : null);
+  if (latest && due !== "skipped" &&
+      !(closed && Date.parse(facts.statusObservedAt) > Date.parse(latest.occurredAt))) {
+    const fields = { reason, method: latest.method || null };
+    if (due) return notNeeded(reason, "event", fields);
+    if (latest.result === "需登录")
+      return make("action_required", "签到站需登录", "red", "登录签到站后重试", "event", fields);
+    if (latest.result === "需人工操作")
+      return reason === "manual_verification_required"
+        ? make("action_required", "需要人工验证", "amber", "在签到站完成人工验证后重试", "event", fields)
+        : make("action_required", "需人工操作", "red", "需要在签到站人工处理", "event", fields);
+    if (["失败", "无法签到"].includes(latest.result))
+      return make("failed", reasonLabels[reason] || (latest.result === "失败" ? "签到失败" : "无法签到"),
+        "red", "今日签到未完成", "event", fields);
+    return make("pending", reasonLabels[reason] || (latest.result === "未执行" ? "签到未执行" : "签到待确认"),
+      "amber", reason === "checkin_unconfirmed" ? "尚未确认今日签到成功" : "今日签到结果待确认", "event", fields);
+  }
+  if (closed) return notNeeded(closed, "site_status");
+  const skipped = due === "skipped" ? reason : null;
+  if (automatic) {
+    const label = shared ? "签到归属待确认"
+      : reasonLabels[skipped] || (facts?.configured === false ? "未配置签到方式"
+        : facts?.supportStatus === "unknown" ? "签到支持待确认"
+          : statusToday && facts.isCheckedInToday === false ? "未签到" : "签到待确认");
+    return make("pending", label, "amber",
+      shared ? "签到账号同时关联多个账号，结果未归属" : "今日尚未收到签到结果",
+      skipped ? "settings" : "none", { reason: skipped });
+  }
+  return make("not_applicable", "无自动签到", "neutral",
+    reasonLabels[skipped] || (observation?.enabled === false ? "插件账号已停用" : "未签到"),
+    "settings", { reason: skipped });
+}
+
+// Every entrance reads account check-in state from here. An account's day is the
+// business day its check-in events are recorded in: the event's zone, else the
+// check-in account's reset zone (as at ingest), else Asia/Taipei.
+export function checkinStates(store, data, now = new Date(), only) {
+  const ids = identities(store, data.accounts), sites = new Map(data.sites.map((s) => [s.id, s]));
+  const date = dayKey(now, ZONE), range = [shift(date, -7), shift(date, 1)];
+  const executorOf = (a) => (a.checkinAccountId && ids.canonical(a.checkinAccountId)) || a;
+  let events;
+  if (!only) events = store.db.prepare(CHECKINS + NEWEST).all(...range);
+  else {
+    const wanted = new Set(only.flatMap((a) => [a.id, executorOf(a).id]));
+    const accountIds = data.accounts.filter((a) => wanted.has(ids.canonical(a.id)?.id)).map((a) => a.id);
+    events = accountIds.length ? store.db.prepare(
+      `${CHECKINS} AND account_id IN (${accountIds.map(() => "?").join()})${NEWEST}`,
+    ).all(...range, ...accountIds) : [];
+  }
+  const { groups, unresolved } = groupCheckins(ids, sites, events);
+  const byAccount = new Map();
+  for (const group of groups)
+    byAccount.set(group.row.accountId, [...(byAccount.get(group.row.accountId) || []), group]);
+  const evaluate = (account) => {
+    const executor = executorOf(account);
+    const shared = ids.beneficiaries.get(executor.id)?.length > 1;
+    const own = shared ? [] : byAccount.get(account.id) || [];
+    const timezone = zoneOf(own[0]?.events[0].timezone, executor.benefit?.tz);
+    const businessDate = dayKey(now, timezone);
+    const group = own.find((g) => g.row.businessDate === businessDate);
+    const automatic = account.enabled !== false && automaticCheckin(store, account);
+    const status = checkinStatus({ account, executor, shared, group, automatic, timezone, businessDate });
+    const row = status.basis === "event" && status.state !== "not_needed" ? { ...group.row, timezone }
+      : status.state === "done" ? {
+        id: `${businessDate}:${account.id}`, accountId: account.id, executorAccountId: executor.id,
+        accountName: account.name || account.id, siteId: account.siteId,
+        siteName: sites.get(account.siteId)?.name, businessDate, timezone,
+        occurredAt: status.confirmedAt, latestResult: "已签到", reason: null, method: status.method,
+        confirmed: true, confirmedAt: status.confirmedAt, applicable: true, rewardText: null, reward: null,
+      } : null;
+    return { status, automatic,
+      row: row && { ...row, state: status.state, basis: status.basis, label: status.label } };
+  };
+  const cache = new Map();
+  return {
+    date,
+    unresolved: unresolved.filter((r) => r.business_date === date).length,
+    of: (account) => {
+      if (!cache.has(account.id)) cache.set(account.id, evaluate(account));
+      return cache.get(account.id);
+    },
+  };
+}
+
+// Each counted account lands in exactly one of completed, failed, unconfirmed,
+// notNeeded or notObserved; disabled and not-applicable accounts are not counted.
+const summaryBucket = ({ status, row }) =>
+  status.state === "done" ? "completed"
+    : ["failed", "action_required"].includes(status.state) ? "failed"
+      : status.state === "not_needed" ? "notNeeded"
+        : status.state === "pending" ? (row ? "unconfirmed" : "notObserved") : null;
+
 export function dailyResources(resources, now = new Date()) {
-  const store = resources.store, date = dayKey(now, ZONE), data = resources.snapshot();
-  const { rows, coverage } = checkinRows(store, { start: date, end: date, timezone: ZONE });
+  const store = resources.store, data = resources.snapshot();
+  const today = checkinStates(store, data, now), date = today.date;
   const sites = new Map(data.sites.filter((s) => !s.removed && !s.mergedInto && !s.resourceExcluded).map((s) => [s.id, s]));
-  const accounts = data.accounts.filter((a) => !a.mergedInto && a.role !== "checkin" && sites.has(a.siteId));
-  const expected = accounts.filter((a) => a.enabled !== false && automaticCheckin(store, a));
-  const enabled = new Set(accounts.filter((a) => a.enabled !== false).map((a) => a.id));
-  const today = rows.filter((r) => enabled.has(r.accountId) && (r.applicable || r.confirmed));
-  const observed = new Set(today.map((r) => r.accountId));
+  const accounts = data.accounts.filter((a) => !a.mergedInto && a.role !== "checkin" && sites.has(a.siteId))
+    .map((account) => ({ account, ...today.of(account) }));
+  const counted = accounts.filter((a) => (a.automatic || a.row) && summaryBucket(a));
+  const count = (bucket) => counted.filter((a) => summaryBucket(a) === bucket).length;
+  const items = counted.filter((a) => a.row).map((a) => a.row).sort(newestRow);
+  const bounds = recorded(store);
   const channels = data.channels.filter((c) => !isRemoved(c) && !isInternal(c) && !c.mergedInto && sites.has(c.siteId));
   const channelIds = new Set(channels.map((c) => c.id));
   const passed = data.offerings.filter((o) => channelIds.has(o.channelId) && verified(o, data.channels.find((c) => c.id === o.channelId)));
   return {
     date, timezone: ZONE, observedAt: now.toISOString(),
-    checkinSummary: { expected: new Set([...expected.map((a) => a.id), ...observed]).size,
-      automaticExpected: expected.length, observed: today.length,
-      completed: today.filter((r) => r.confirmed).length,
-      failed: today.filter((r) => !r.confirmed && ["失败", "需登录", "需人工操作", "无法签到"].includes(r.latestResult)).length,
-      unconfirmed: today.filter((r) => !r.confirmed && !["失败", "需登录", "需人工操作", "无法签到"].includes(r.latestResult)).length,
-      notObserved: expected.filter((a) => !observed.has(a.id)).length, items: today },
-    interventions: today.filter((r) => ["需登录", "需人工操作"].includes(r.latestResult)).map((r) => ({
+    checkinSummary: { expected: counted.length,
+      automaticExpected: accounts.filter((a) => a.automatic).length, observed: items.length,
+      completed: count("completed"), failed: count("failed"), unconfirmed: count("unconfirmed"),
+      notNeeded: count("notNeeded"), notObserved: count("notObserved"), items },
+    interventions: items.filter((r) => r.state === "action_required").map((r) => ({
       id: `checkin:${r.accountId}:${date}:${r.latestResult === "需登录" ? "login" : "human"}`,
       siteId: r.siteId, accountId: r.accountId, businessDate: date,
       kind: r.latestResult === "需登录" ? "checkin_login" : "checkin_human_required",
       title: `${r.siteName} · ${r.accountName}：${r.latestResult}`, state: "open", action: "review_checkin",
     })),
-    accounts: accounts.map((a) => ({ id: a.id, siteId: a.siteId, siteName: sites.get(a.siteId).name,
-      name: a.name, enabled: a.enabled !== false, automaticCheckin: a.enabled !== false && automaticCheckin(store, a),
-      entitlement: entitlement(a, now) })),
+    accounts: accounts.map(({ account: a, automatic, status }) => ({ id: a.id, siteId: a.siteId,
+      siteName: sites.get(a.siteId).name, name: a.name, enabled: a.enabled !== false,
+      automaticCheckin: automatic, entitlement: entitlement(a, now), checkinToday: status })),
     resourceSummary: { sites: sites.size, registeredChannels: channels.length,
       catalogReadableChannels: channels.filter((c) => resources.scanObservation(c, data)?.catalogStatus === "ok").length,
       verifiedModels: passed.length, verificationBasis: "渠道与模型组合的已有任务验证结论，非实时可用性保证" },
-    coverage,
+    coverage: { startDate: date, endDate: date, timezone: ZONE,
+      firstRecordedDate: bounds.first, lastRecordedDate: bounds.last,
+      complete: false, unresolvedAccounts: today.unresolved,
+      basis: "各账号按签到记录的时区取当前业务日，汇总已接收的签到记录与插件当日签到状态；未收到不表示未签到" },
   };
 }

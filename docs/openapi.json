@@ -662,11 +662,185 @@
                                   "type": "integer",
                                   "minimum": -9007199254740991,
                                   "maximum": 9007199254740991
+                                },
+                                "checkinToday": {
+                                  "type": "object",
+                                  "properties": {
+                                    "state": {
+                                      "type": "string",
+                                      "enum": [
+                                        "done",
+                                        "not_needed",
+                                        "action_required",
+                                        "failed",
+                                        "pending",
+                                        "not_applicable"
+                                      ]
+                                    },
+                                    "label": {
+                                      "type": "string"
+                                    },
+                                    "tone": {
+                                      "type": "string",
+                                      "enum": [
+                                        "green",
+                                        "neutral",
+                                        "amber",
+                                        "red"
+                                      ]
+                                    },
+                                    "detail": {
+                                      "type": "string"
+                                    },
+                                    "basis": {
+                                      "type": "string",
+                                      "enum": [
+                                        "event",
+                                        "site_status",
+                                        "manual_mark",
+                                        "settings",
+                                        "none"
+                                      ]
+                                    },
+                                    "reason": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ]
+                                    },
+                                    "method": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ]
+                                    },
+                                    "confirmedAt": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ]
+                                    },
+                                    "businessDate": {
+                                      "type": "string"
+                                    },
+                                    "timezone": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "state",
+                                    "label",
+                                    "tone",
+                                    "detail",
+                                    "basis",
+                                    "reason",
+                                    "method",
+                                    "confirmedAt",
+                                    "businessDate",
+                                    "timezone"
+                                  ]
+                                },
+                                "checkinAccount": {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string"
+                                    },
+                                    "version": {
+                                      "type": "integer",
+                                      "minimum": -9007199254740991,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "checkinToday": {
+                                      "type": "object",
+                                      "properties": {
+                                        "state": {
+                                          "type": "string",
+                                          "enum": [
+                                            "done",
+                                            "not_needed",
+                                            "action_required",
+                                            "failed",
+                                            "pending",
+                                            "not_applicable"
+                                          ]
+                                        },
+                                        "label": {
+                                          "type": "string"
+                                        },
+                                        "tone": {
+                                          "type": "string",
+                                          "enum": [
+                                            "green",
+                                            "neutral",
+                                            "amber",
+                                            "red"
+                                          ]
+                                        },
+                                        "detail": {
+                                          "type": "string"
+                                        },
+                                        "basis": {
+                                          "type": "string",
+                                          "enum": [
+                                            "event",
+                                            "site_status",
+                                            "manual_mark",
+                                            "settings",
+                                            "none"
+                                          ]
+                                        },
+                                        "reason": {
+                                          "type": [
+                                            "string",
+                                            "null"
+                                          ]
+                                        },
+                                        "method": {
+                                          "type": [
+                                            "string",
+                                            "null"
+                                          ]
+                                        },
+                                        "confirmedAt": {
+                                          "type": [
+                                            "string",
+                                            "null"
+                                          ]
+                                        },
+                                        "businessDate": {
+                                          "type": "string"
+                                        },
+                                        "timezone": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "state",
+                                        "label",
+                                        "tone",
+                                        "detail",
+                                        "basis",
+                                        "reason",
+                                        "method",
+                                        "confirmedAt",
+                                        "businessDate",
+                                        "timezone"
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "version",
+                                    "checkinToday"
+                                  ],
+                                  "additionalProperties": {}
                                 }
                               },
                               "required": [
                                 "id",
-                                "version"
+                                "version",
+                                "checkinToday"
                               ],
                               "additionalProperties": {}
                             }
@@ -1027,11 +1201,185 @@
                             "type": "integer",
                             "minimum": -9007199254740991,
                             "maximum": 9007199254740991
+                          },
+                          "checkinToday": {
+                            "type": "object",
+                            "properties": {
+                              "state": {
+                                "type": "string",
+                                "enum": [
+                                  "done",
+                                  "not_needed",
+                                  "action_required",
+                                  "failed",
+                                  "pending",
+                                  "not_applicable"
+                                ]
+                              },
+                              "label": {
+                                "type": "string"
+                              },
+                              "tone": {
+                                "type": "string",
+                                "enum": [
+                                  "green",
+                                  "neutral",
+                                  "amber",
+                                  "red"
+                                ]
+                              },
+                              "detail": {
+                                "type": "string"
+                              },
+                              "basis": {
+                                "type": "string",
+                                "enum": [
+                                  "event",
+                                  "site_status",
+                                  "manual_mark",
+                                  "settings",
+                                  "none"
+                                ]
+                              },
+                              "reason": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "method": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "confirmedAt": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "businessDate": {
+                                "type": "string"
+                              },
+                              "timezone": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "state",
+                              "label",
+                              "tone",
+                              "detail",
+                              "basis",
+                              "reason",
+                              "method",
+                              "confirmedAt",
+                              "businessDate",
+                              "timezone"
+                            ]
+                          },
+                          "checkinAccount": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "version": {
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
+                              },
+                              "checkinToday": {
+                                "type": "object",
+                                "properties": {
+                                  "state": {
+                                    "type": "string",
+                                    "enum": [
+                                      "done",
+                                      "not_needed",
+                                      "action_required",
+                                      "failed",
+                                      "pending",
+                                      "not_applicable"
+                                    ]
+                                  },
+                                  "label": {
+                                    "type": "string"
+                                  },
+                                  "tone": {
+                                    "type": "string",
+                                    "enum": [
+                                      "green",
+                                      "neutral",
+                                      "amber",
+                                      "red"
+                                    ]
+                                  },
+                                  "detail": {
+                                    "type": "string"
+                                  },
+                                  "basis": {
+                                    "type": "string",
+                                    "enum": [
+                                      "event",
+                                      "site_status",
+                                      "manual_mark",
+                                      "settings",
+                                      "none"
+                                    ]
+                                  },
+                                  "reason": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "method": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "confirmedAt": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "businessDate": {
+                                    "type": "string"
+                                  },
+                                  "timezone": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "state",
+                                  "label",
+                                  "tone",
+                                  "detail",
+                                  "basis",
+                                  "reason",
+                                  "method",
+                                  "confirmedAt",
+                                  "businessDate",
+                                  "timezone"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "version",
+                              "checkinToday"
+                            ],
+                            "additionalProperties": {}
                           }
                         },
                         "required": [
                           "id",
-                          "version"
+                          "version",
+                          "checkinToday"
                         ],
                         "additionalProperties": {}
                       }
@@ -7804,7 +8152,8 @@
                             "需登录",
                             "需人工操作",
                             "未执行",
-                            "无法签到"
+                            "无法签到",
+                            "无需签到"
                           ]
                         },
                         "reason": {

@@ -1,6 +1,6 @@
 import { ArrowUpRight, CalendarCheck2 } from "lucide-react";
 import { Badge, EmptyState, SectionHeading } from "../components";
-import { amount, dateTime, hubCheckinStatus, isHubAccount } from "../data";
+import { amount, dateTime, isHubAccount } from "../data";
 import { useWorkspace } from "../workspace";
 export default function Benefits() {
   const { sites, query, inspectSite } = useWorkspace();
@@ -34,9 +34,7 @@ export default function Benefits() {
             </div>
             {s.accounts.map((a) => {
               const executor = a.checkinAccount || a;
-              const status = isHubAccount(executor)
-                ? hubCheckinStatus(executor)
-                : null;
+              const status = isHubAccount(executor) ? a.checkinToday : null;
               return (
                 <div key={a.id}>
                   <div className="benefit-account">

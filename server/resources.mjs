@@ -7,11 +7,10 @@ export { policies, entitlement } from "./maintenance-policy.mjs";
 import { randomUUID } from "node:crypto";
 import { Problem, publicValue } from "./errors.mjs";
 import { normalizeUrl, canonicalApi, dayKey } from "./domain.mjs";
-import { dailyResources } from "./checkins.mjs";
+import { dailyResources, checkinStates } from "./checkins.mjs";
 import {
   linkCheckinAccounts,
   archiveDepletedAccounts,
-  automaticCheckin,
 } from "./account-state.mjs";
 import {
   tagsOf,
@@ -592,11 +591,14 @@ export class Resources {
         countsTowardCurrentGrade: false,
       }));
   }
-  detail(id, data = this.snapshot()) {
+  detail(id, data = this.snapshot(), today) {
     const site = data.sites.find((s) => s.id === id);
     if (!site) throw new Problem(404, "站点不存在");
-    const accounts = data.accounts
-      .filter((a) => a.siteId === id && !a.mergedInto && a.role !== "checkin")
+    const own = data.accounts.filter(
+      (a) => a.siteId === id && !a.mergedInto && a.role !== "checkin",
+    );
+    today ||= checkinStates(this.store, data, new Date(), own);
+    const accounts = own
       .map((a) => {
         const rights = entitlement(a);
         const executor = a.checkinAccountId
@@ -611,19 +613,22 @@ export class Resources {
             ...JSON.parse(e.data),
             businessDate: e.business_date,
           }));
+        const { status, automatic } = today.of(a);
         return {
           ...publicValue(a),
           ...(rights.balanceBasis === "fixed_daily" ? {balance: rights.balance} : {}),
-          automaticCheckin: a.enabled !== false && automaticCheckin(this.store, a),
+          automaticCheckin: automatic,
           integration: this.distribution?.hubEligibility(a),
           entitlement: rights,
           checkins,
+          checkinToday: status,
           ...(executor.id !== a.id
             ? {
                 checkinAccount: {
                   ...publicValue(executor),
                   entitlement: entitlement(executor),
                   checkins,
+                  checkinToday: status,
                 },
               }
             : {}),
@@ -640,9 +645,10 @@ export class Resources {
   }
   sites(query = {}) {
     const q = (query.q || "").toLowerCase();
-    const data = this.snapshot();
+    const data = this.snapshot(),
+      today = checkinStates(this.store, data);
     const rows = data.sites
-      .map((s) => this.detail(s.id, data))
+      .map((s) => this.detail(s.id, data, today))
       .filter((s) => {
         if (s.removed || s.resourceExcluded) return false;
         if (!s.channels.length) {

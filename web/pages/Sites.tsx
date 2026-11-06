@@ -21,7 +21,6 @@ import {
   amount,
   balances,
   channelStatus,
-  hubCheckinStatus,
   hubCheckinUrl,
   siteCheckinAccounts,
   searchSites,
@@ -143,7 +142,7 @@ function HubCheckinCell({
   return (
     <div className="site-cell hub-cell">
       {accounts.map((account) => {
-        const status = hubCheckinStatus(account);
+        const status = account.checkinToday;
         const url = hubCheckinUrl(site, account);
         const badge = <Badge tone={status.tone}>{status.label}</Badge>;
         return (
@@ -184,7 +183,7 @@ function HubCheckinCell({
                   {new URL(url).hostname}
                 </a>
               )}
-            {!status.checkedIn && !url && (
+            {status.state !== "done" && !url && (
               <button
                 className="hub-entry-button"
                 aria-label={`设置签到入口：${account.name}`}
