@@ -38,7 +38,7 @@ WebUI 提供可直接打开的站点、模型筛选和运行记录链接，Hub �
 | --- | --- |
 | Site | `id, name, websiteUrl, checkinUrl, aliases, sources, pinned, version`；站点统一入口，保留独立签到地址；置顶属于用户管理资料 |
 | Account | `id, siteId, name, sourceRefs, balances, checkin, entitlements, version`；余额和签到归账号 |
-| Channel | `id, siteId, accountId, capabilities, tags, baseUrl, protocol, models, credentialStatus, clientRequirements, management, recovery, version`；一份渠道资料可被多个应用使用，凭据不返回明文 |
+| Channel | `id, siteId, accountId, capabilities, tags, baseUrl, protocol, models, knownModels, activeModels, credentialStatus, clientRequirements, management, recovery, version`；一份渠道资料可被多个应用使用，凭据不返回明文。`knownModels` 汇总配置、来源观察、目录扫描和验证记录中的模型；`activeModels` 是当前已生效的模型，两者均由服务计算 |
 | ApplicationBinding | `id, channelId, application, instanceId, nativeId, modelId, overrides, enabled, order, version`；保存各应用选定模型和连接设置，多个绑定不改变共享模型目录 |
 | ModelAvailability | `channelId, modelId, group, capabilityClass, catalog, stationMetrics, verification, recentCalls`；分组、目录、站方统计和自己的实测分开 |
 | Entitlement | `id, accountId, kind, balance, unit, expiresAt, resetTimezone, resetRule, checkinThreshold, releaseTimes, windows, evidence`；时间规则未知则为空 |
@@ -75,7 +75,7 @@ WebUI 提供可直接打开的站点、模型筛选和运行记录链接，Hub �
 | 看今日资源 | `GET /overview` | `resource_overview` | 日期、时区；可用资源摘要、当日权益、签到及待办摘要 |
 | 找站点 | `GET /sites` | `resource_list_sites` | `q, capability, tag, application, status, recoveryState, cursor`；按站点聚合，不按来源重复行 |
 | 看完整站点 | `GET /sites/{id}` | `resource_get_site` | 账号、渠道、签到入口、规则、最新结果和来源 |
-| 找可用模型 | `GET /models` | `resource_list_models` | `q, capabilityClass, capability, tag, application, availability`；模型及对应渠道 |
+| 找可用模型 | `GET /models` | `resource_list_models` | `q, capabilityClass, capability, tag, application, availability`；模型及对应渠道，每行的 `active` 与渠道 `activeModels` 使用同一规则 |
 | 看处理事项 | `GET /attention` | `resource_list_attention` | 原因、相关资源、动作；不混入普通维护日志 |
 | 看维护与调用记录 | `GET /history` | `resource_history` | `siteId, channelId, modelId, kind, from, to`；分页记录及采集覆盖说明 |
 | 新增站点／账号／渠道 | `POST /sites`、`POST /accounts`、`POST /channels` | `resource_create_site`、`resource_create_account`、`resource_create_channel` | 明确对象关系；创建和保存不触发上游调用 |
@@ -125,7 +125,7 @@ HTTP 接受后返回 `202` 和 `{ "operationId": "example-operation", "state": "
 | 接收任务结果 | `POST /ingest/task-results` | 仅受信任的任务适配器调用 |
 | 生成目标配置 | `POST /configurations` | `resource_prepare_configuration`；输入目标和渠道，返回制品引用、适用客户端及同步状态 |
 | 获取配置／提交应用回执 | `GET /configurations/{id}`、`POST /configurations/{id}/receipt` | 绑定客户端；密钥配置不进入通用查询或 MCP 文本结果 |
-| 查询 RP 连接 | `GET /rp/connections` | `resource_list_rp_connections`；返回酒馆应用绑定及关联渠道，过滤实例，读取不访问上游 |
+| 查询 RP 连接 | `GET /rp/connections` | `resource_list_rp_connections`；返回酒馆应用绑定及关联渠道，过滤实例，读取不访问上游。`rp`／`connector` 凭据只能读取本实例的绑定，不能调用其他管理能力 |
 | 保存 RP 连接 | `PATCH /rp/connections/{id}` | `resource_update_rp_connection`；更新对应酒馆绑定，所选模型不覆盖共享目录；共享字段按渠道版本更新 |
 | 上报酒馆已保存连接 | `POST /rp/saves` | 酒馆保存适配器；本地版本、中心基线版本和来源事件标识 |
 | 取得／确认酒馆配置变更 | `GET /connector/jobs`、`POST /connector/receipts` | 配对酒馆实例及用户；租约任务，确认原生保存回读结果 |
@@ -160,6 +160,8 @@ MCP 提供管理动作，不提供任意 shell、任意 URL 请求或凭据导�
 - RP 保存：实例、原生连接 ID、中心连接 ID（首次可缺）、中心基线版本、本地保存版本、变更字段；敏感凭据经受限配置通道传递。
 
 HTTP 的参数错误、认证失败、权限不足、对象不存在、版本冲突分别使用 `400/401/403/404/409`；服务内部错误返回 `5xx`。错误体为 `code, message, details`，必要时附 `operationId`。版本冲突详情包含新版本和可安全展示的字段差异，凭据差异只表示“已更换”。
+
+当前实现：版本冲突统一返回 `code: version_conflict` 和 `details.currentVersion`（酒馆连接另附 `channelVersion`），尚未附字段差异；客户端据此重新读取后再修改。其他 409 是业务规则拒绝，沿用各自的 `code`（如 `scope_changed`、`cursor_expired`）和说明，不应当作版本冲突自动重读。参数错误的 `message` 逐项列出“字段路径：原因”。
 
 某站点的 429、余额不足或模型失败属于扫描／验证结果，不冒充资源服务本身的 HTTP 故障。MCP 业务失败用 `isError` 和同一错误结构；正常返回“渠道验证未通过”的任务结果保留完整业务状态。[MCP 工具结果与错误处理](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)
 

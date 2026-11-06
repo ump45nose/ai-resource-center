@@ -153,3 +153,20 @@ python3 integrations/cron_adapter.py --config /私密路径/cron-access.json \
 WebUI 的“扫描与测试”提供批量只扫描／扫描并验证、模型结果、自动维护设置、cron 目录与可适配任务绑定、最近恢复和网关冲突处理。当前无适配 cron；不启动或恢复用户业务任务，生图视频仍等待 image-caption。
 
 2026-10-23 fn 已开启网站、目录与模型广场周期检查，小任务和自动恢复暂未开启；91 个 cron 均尚未适配单次配置和结果回执。历史首轮扫描的 71 条通用渠道中，32 条目录可读、其中 28 条有模型，目录结果不算调用通过。New API 已接管此前七条和本轮确认的十四条连接：十九条配置已同步，皮皮智绘等待额度、runanytime 等待客户端透传验证；其他存量未接管。All API Hub 的八十个账号与 Chrome 书签已开启自动同步。书签复用原“公益站”目录，维护四个用途和六类归档；更新前应用、一致数据库和配套密钥保存在 `/vol2/1000/Docker/ai-resource-center-v2/backups/unified-management-20261023-154912`。回退时先关闭自动维护、保留新数据，再切换前镜像；已产生的后续网关改动逐条按托管映射处理，不整库覆盖 New API。
+
+## 2026-11-06：结构整理与缺陷修复
+
+分层（存储 → 业务服务 → 能力注册 → HTTP／MCP／WebUI）保持不变；本轮合并重复规则并修复下列问题。持久化数据形状、同步修订摘要和 `/api/v1` 语义不变。
+
+- 多步写入各自在一个事务内完成：渠道／账号保存、补 key、账号状态整理、合并、迁移、采用外部配置和切换同步目标。事务可嵌套，内层失败整体回滚。
+- 渠道可用模型由服务计算（`knownModels`、`activeModels`，`/models` 行的 `active`），WebUI 不再另算。
+- 同步：Gemini 渠道按 New API 类型 24 写入；连接器和酒馆回执保存前去除 key 与请求头；All API Hub 回执未报告的字段不再误报冲突。
+- 传输：OpenAPI 按路径合并方法，补回 `resource_list_tasks` 和会话接口，CI 检查 `docs/openapi.json` 与生成结果一致。鉴权按路由匹配，编码后的路径同样需要凭据；异常 Origin 返回 403；MCP 只转发传输所需的请求头；绑定局部修改不再重置其他字段。
+- 维护：账号窗口统一按账号时区判断；`/policies` 不再返回已退役的 `syncMinutes`、`callsMinutes`；扫描进度计入中途跳过的目标；cron 适配器单个文件失败不中断补交。
+- 错误：版本冲突统一为 `version_conflict`；参数错误给出字段路径和原因。
+
+新模块：`server/openapi.mjs`（OpenAPI 生成）、`http-security.mjs`（CORS、鉴权与来源校验）、`history.mjs`（维护与调用记录）、`canonical.mjs`（规范 JSON 与摘要）、`newapi-channel.mjs`（New API 渠道类型与请求头）、`redaction.mjs`（回执去密）。
+
+已知未改：同步任务载荷的 `headerValues` 和 New API 快照的 `header_override` 仍以明文存在数据库中。改为引用或摘要需要迁移已保存的快照，否则回读比较会误报冲突，留待单独处理。
+
+验证：44 项接口场景、类型检查与构建、OpenAPI 一致性检查；本地浏览器对比改动前后 14 个界面状态，布局无差异。本轮只在本地提交，尚未部署 fn。
