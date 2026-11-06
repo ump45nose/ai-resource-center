@@ -22,8 +22,8 @@ export const usageLabels = {
   general: "通用",
   image: "生图",
   video: "视频",
-  rp: "酒馆",
 };
+export const rpRemovalReason = "RP 渠道移出中心：只在酒馆和 Chrome 书签中管理";
 export const archiveLabels = {
   website: "网站打不开",
   balance: "无余额无签到",
@@ -82,7 +82,6 @@ export function archiveOf(c, site) {
   return [...issues];
 }
 export function gatewayBlock(c) {
-  if (usageOf(c) === "rp") return "酒馆分组只在酒馆维护，不导入 New API";
   if (c.gatewayAllowed === false) return "此渠道不允许导入 New API";
   return null;
 }
@@ -111,24 +110,14 @@ export const applicationsOf = (c) =>
         typeof b === "string" ? b : b.application,
       ),
       ...(c.gateway?.sourceId === "cpa" ? [] : c.gateway ? ["New API"] : []),
-      ...(usageOf(c) === "rp" ? ["酒馆"] : []),
     ]),
   ].filter(Boolean);
+// Legacy RP records keep usage "rp"; they are soft-removed from the center.
 export const isRp = (c) => usageOf(c) === "rp";
+export const rpRemoved = (x) => x?.removal?.kind === "rp";
 export const isRemoved = (c) =>
   c.availability === "已移除" || c.management?.state === "removed";
 export const isInternal = (c) => c.internal === true;
-export function rpChannels(store, auth) {
-  if (!["admin", "rp"].includes(auth.role))
-    throw new Problem(403, "RP 连接未授权");
-  return store
-    .list("channel")
-    .filter(
-      (c) =>
-        isRp(c) &&
-        (auth.role === "admin" || auth.scope?.channelIds?.includes(c.id)),
-    );
-}
 
 export function validateTags(tags) {
   if (tags.some((tag) => !Object.hasOwn(tagLabels, tag)))

@@ -15,6 +15,7 @@ import {
   archiveOf,
   isRemoved,
   isInternal,
+  isRp,
   channelHeaders,
   tagsOf,
 } from "./channel-rules.mjs";
@@ -30,7 +31,6 @@ import { NotionMirror } from "./notion-mirror.mjs";
 const targetNames = {
   newapi: "New API",
   "all-api-hub": "All API Hub",
-  sillytavern: "酒馆插件",
   notion: "Notion",
   "chrome-bookmarks": "Chrome 书签",
 };
@@ -312,7 +312,9 @@ export class Distribution {
       .filter((s) => !s.removed && !s.mergedInto);
     const channels = this.store
       .list("channel")
-      .filter((c) => !c.sourceOnly && !c.mergedInto && !isInternal(c));
+      .filter(
+        (c) => !c.sourceOnly && !c.mergedInto && !isInternal(c) && !isRp(c),
+      );
     if (id === "notion")
       return sites.map((s) => ({
         subject: s.id,
@@ -350,41 +352,29 @@ export class Distribution {
           };
         });
     return channels
-      .filter((c) =>
-        id === "sillytavern"
-          ? usageOf(c) === "rp" ||
-            !!this.store.get("targetLink", `${id}:${c.id}`)
-          : usageOf(c) !== "rp" ||
-            !!c.gateway ||
-            !!this.store.get("targetLink", `${id}:${c.id}`),
-      )
       .filter(
         (c) =>
-          id !== "newapi" ||
           active(c) ||
           !!this.store.get("targetLink", `${id}:${c.id}`)?.remoteId ||
           c.gateway?.sourceId === this.source(this.config(id)).id,
       )
       .map((c) => ({
         subject: c.id,
+        // Field set and values are part of each stored delivery revision.
         payload: {
           channelId: c.id,
           siteId: c.siteId,
           accountId: c.accountId,
           name: c.name,
-          baseUrl:
-            id === "newapi" ? canonicalApi(c.baseUrl, c.protocol) : c.baseUrl,
+          baseUrl: canonicalApi(c.baseUrl, c.protocol),
           protocol: c.protocol,
-          models:
-            id === "newapi" ? routableModels(this.store, c) : c.models || [],
+          models: routableModels(this.store, c),
           usage: usageOf(c),
           tags: tagsOf(c),
           enabled:
             active(c) &&
-            (id === "newapi"
-              ? usageOf(c) !== "rp" && c.gatewayAllowed !== false
-                && routableModels(this.store, c).length > 0
-              : usageOf(c) === "rp"),
+            c.gatewayAllowed !== false &&
+            routableModels(this.store, c).length > 0,
           order: c.order || 0,
           credentialId: c.credentialId || null,
           credentialHeadersId: c.credentialHeadersId || null,
@@ -394,7 +384,7 @@ export class Distribution {
                 .prepare("SELECT fingerprint FROM credentials WHERE id=?")
                 .get(c.credentialId)?.fingerprint
             : null,
-          routing: id === "newapi" ? this.routing(c) : null,
+          routing: this.routing(c),
           connectionVersion: c.connectionVersion || 1,
           headerValues: channelHeaders(this.store, c),
         },
@@ -496,11 +486,7 @@ export class Distribution {
       previewId: preview.id,
       target: id,
       rows,
-      browserReadbackRequired: [
-        "all-api-hub",
-        "sillytavern",
-        "chrome-bookmarks",
-      ].includes(id),
+      browserReadbackRequired: ["all-api-hub", "chrome-bookmarks"].includes(id),
     });
   }
   confirm(id, previewId, subjectIds) {
@@ -703,13 +689,9 @@ export class Distribution {
     return result.slice(0, query.subject ? undefined : 200);
   }
   channelStatus(id) {
-    return ["newapi", "sillytavern"].flatMap((target) =>
-      this.currentJobs(target)
-        .filter((j) => j.subject === id)
-        .map((j) =>
-          publicValue({ ...j, payload: undefined, receipt: undefined }),
-        ),
-    );
+    return this.currentJobs("newapi")
+      .filter((j) => j.subject === id)
+      .map((j) => publicValue({ ...j, payload: undefined, receipt: undefined }));
   }
   observeNewApi(sourceId, channels, startedAt) {
     const target = this.config("newapi");
@@ -786,7 +768,6 @@ export class Distribution {
       });
   }
   runtimeEnabled(c) {
-    if (usageOf(c) === "rp") return null;
     const link = this.store.get("targetLink", `newapi:${c.id}`);
     if (
       link?.observedSnapshot &&
@@ -872,17 +853,6 @@ export class Distribution {
                 : {}),
               ...(remote.disabled != null ? { enabled: !remote.disabled } : {}),
             });
-        } else if (j.target === "sillytavern") {
-          const c = this.store.require("channel", j.subject);
-          const { name, baseUrl, protocol, models, order, enabled } = remote;
-          this.resources.update("channel", c.id, c.version, {
-            name,
-            baseUrl,
-            protocol,
-            models,
-            order,
-            enabled,
-          });
         } else throw new Problem(400, "镜像不支持反向采用配置");
         this.store.put("targetLink", {
           ...link,
@@ -1202,9 +1172,7 @@ export class Distribution {
   claim(auth) {
     if (
       auth.role !== "connector" ||
-      !["all-api-hub", "chrome-bookmarks", "sillytavern"].includes(
-        auth.scope.target,
-      )
+      !["all-api-hub", "chrome-bookmarks"].includes(auth.scope.target)
     )
       throw new Problem(403, "需要绑定目标的独立执行凭据");
     const target = auth.scope.target,
@@ -1240,38 +1208,6 @@ export class Distribution {
           });
           const link = this.store.get("targetLink", `${target}:${j.subject}`),
             payload = publicValue({ ...j.payload, headerValues: undefined });
-          if (target === "sillytavern") {
-            payload.credential = j.payload.credentialId
-              ? this.store.reveal(j.payload.credentialId)
-              : null;
-            payload.headers = j.payload.headerValues;
-            payload.switchCurrent = false;
-            payload.nativeCredentialReference = j.payload.nativeCredentialRef;
-            // A gateway transition must finish disabling first.
-            const old = this.store.get("targetLink", `newapi:${j.subject}`);
-            if (
-              j.payload.enabled &&
-              old?.remoteId &&
-              this.store
-                .list("delivery")
-                .some(
-                  (d) =>
-                    d.target === "newapi" &&
-                    d.subject === j.subject &&
-                    d.state !== "applied" &&
-                    d.state !== "superseded",
-                )
-            ) {
-              this.store.put("delivery", {
-                ...this.store.require("delivery", j.id),
-                state: "waiting",
-                leaseUntil: null,
-                retryAt: new Date(Date.now() + 60000).toISOString(),
-                reason: "等待停用 New API 入口",
-              });
-              return null;
-            }
-          }
           return {
             id: j.id,
             lease,

@@ -19,7 +19,6 @@ import {
   type ChannelTag,
   type ChannelUsage,
 } from "./data";
-import RpConnections from "./RpConnections";
 import SyncStatus from "./SyncStatus";
 
 export default function ChannelEditor({
@@ -104,7 +103,6 @@ export default function ChannelEditor({
               : {}),
             tags,
             client: f.get("client") || "",
-            order: Number(f.get("order") || 0),
             note: f.get("note"),
             enabled: f.get("enabled") === "on",
             recoveryPolicy: { enabled: f.get("recovery") === "on" },
@@ -285,24 +283,13 @@ export default function ChannelEditor({
                 </label>
               ))}
             </fieldset>
-            <div className="form-grid">
-              <label>
-                限定客户端
-                <input
-                  name="client"
-                  defaultValue={c.client || c.clientRequirements?.client || ""}
-                />
-              </label>
-              <label>
-                酒馆排序
-                <input
-                  type="number"
-                  name="order"
-                  min="0"
-                  defaultValue={c.order || 0}
-                />
-              </label>
-            </div>
+            <label>
+              限定客户端
+              <input
+                name="client"
+                defaultValue={c.client || c.clientRequirements?.client || ""}
+              />
+            </label>
             <label>
               备注
               <textarea name="note" rows={2} defaultValue={c.note || ""} />
@@ -433,7 +420,6 @@ export default function ChannelEditor({
         </p>
       )}
       <SyncStatus subject={c.id} />
-      <RpConnections channelId={c.id} />
       <div className="management-footnote">
         {c.recovery.waitingFor || c.recovery.reason || "未归档"}
         {c.recovery.nextCheckAt &&

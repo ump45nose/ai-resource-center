@@ -19,6 +19,8 @@ import {
   applicationsOf,
   isInternal,
   isRemoved,
+  isRp,
+  rpRemoved,
   validateTags,
   probeBlock,
   legacyTags,
@@ -27,6 +29,14 @@ import {
   gatewayBlock,
   archiveLabels,
 } from "./channel-rules.mjs";
+
+const rpOutOfCenter = () =>
+  new Problem(
+    409,
+    "RP 渠道已移出中心，只在酒馆和 Chrome 书签中管理",
+    undefined,
+    "rp_out_of_center",
+  );
 
 const purpose = (c) => c.category || "general";
 const knownModels = (c, scan, offerings) => [
@@ -56,14 +66,12 @@ const activeModels = (c) =>
   ) ||
   c.management?.prohibited ||
   c.credentialStatus === "missing" ||
-  (c.usage !== "rp" &&
-    c.runtimeEnabled == null &&
+  (c.runtimeEnabled == null &&
     (c.sourceObservation?.present === false ||
       c.sourceObservation?.enabled === false))
     ? []
     : [...new Set(c.models)].filter(
         (id) =>
-          c.usage === "rp" ||
           c.runtimeEnabled === true ||
           !c.sourceObservation ||
           c.sourceObservation.models?.includes(id),
@@ -107,7 +115,10 @@ export class Resources {
       throw new Problem(400, "站点需要 HTTP(S) 地址");
     const sites = this.store
       .list("site")
-      .filter((s) => !s.mergedInto && (source !== "manual" || !s.removed));
+      .filter(
+        (s) =>
+          !s.mergedInto && (source !== "manual" || !s.removed || rpRemoved(s)),
+      );
     let matches = sites.filter((s) =>
       [s.url, ...(s.aliases || [])].some((u) => normalizeUrl(u) === url),
     );
@@ -126,16 +137,26 @@ export class Resources {
         ...new Set([...(old.aliases || []), ...(old.url !== url ? [url] : [])]),
       ];
       const sources = [...new Set([...(old.sources || []), source])];
+      // A site removed only because RP left the center returns with new content.
+      const revived = rpRemoved(old);
       if (
+        !revived &&
         aliases.length === (old.aliases || []).length &&
         sources.length === (old.sources || []).length
       )
         return old;
-      return this.store.put("site", {
-        ...old,
-        aliases,
-        sources,
-        version: old.version + 1,
+      const next = { ...old, aliases, sources, version: old.version + 1 };
+      if (!revived) return this.store.put("site", next);
+      delete next.removed;
+      delete next.removal;
+      return this.store.transaction(() => {
+        this.store.action(old.id, {
+          kind: "site",
+          fields: ["removed", "removal"],
+          result: "restored",
+          reason: `来源 ${source} 重新提供该站点`,
+        });
+        return this.store.put("site", next);
       });
     }
     return this.store.put("site", {
@@ -149,6 +170,7 @@ export class Resources {
     });
   }
   channel(input) {
+    if (isRp({ category: input.purpose, ...input })) throw rpOutOfCenter();
     this.store.require("site", input.siteId);
     const account = this.store.require("account", input.accountId);
     if (account.siteId !== input.siteId)
@@ -157,11 +179,9 @@ export class Resources {
       id: randomUUID(),
       name: input.name,
       category: input.usage
-        ? input.usage === "rp"
-          ? "rp"
-          : ["image", "video"].includes(input.usage)
-            ? "media"
-            : "general"
+        ? ["image", "video"].includes(input.usage)
+          ? "media"
+          : "general"
         : input.purpose || "general",
       curation: { authority: "center" },
       protocol: "OpenAI",
@@ -300,12 +320,9 @@ export class Resources {
         delete changes.purpose;
       }
       if (kind === "channel" && changes.usage)
-        changes.category =
-          changes.usage === "rp"
-            ? "rp"
-            : ["image", "video"].includes(changes.usage)
-              ? "media"
-              : "general";
+        changes.category = ["image", "video"].includes(changes.usage)
+          ? "media"
+          : "general";
       if (kind === "channel" && Object.hasOwn(changes, "mode"))
         changes.management = {
           ...old.management,
@@ -317,6 +334,12 @@ export class Resources {
           changes.baseUrl,
           changes.protocol || this.store.require(kind, id).protocol,
         );
+      if (
+        kind === "channel" &&
+        isRp({ ...old, ...changes }) &&
+        !isRemoved({ ...old, ...changes })
+      )
+        throw rpOutOfCenter();
       const saved = this.store.update(kind, id, version, changes);
       if (kind === "account" && changes.checkinEnabled === false)
         this.reconcileAccountState([id]);
@@ -660,7 +683,11 @@ export class Resources {
           // brought back as empty sites merely because their history has accounts.
           if (
             data.channels.some(
-              (c) => c.siteId === s.id && !c.sourceOnly && !c.mergedInto,
+              (c) =>
+                c.siteId === s.id &&
+                !c.sourceOnly &&
+                !c.mergedInto &&
+                !rpRemoved(c),
             )
           )
             return false;
@@ -834,7 +861,7 @@ export class Resources {
       observedAt: new Date().toISOString(),
       sites: this.store.list("site").filter((s) => !s.removed && !s.mergedInto && !s.resourceExcluded).length,
       channels: Object.fromEntries(
-        ["general", "media", "rp", "client"].map((p) => [
+        ["general", "media", "client"].map((p) => [
           p,
           channels.filter((c) => purpose(c) === p).length,
         ]),
@@ -842,7 +869,8 @@ export class Resources {
       dailyEntitlements: accounts
         .filter(
           (a) => !a.mergedInto && a.enabled !== false &&
-            !this.store.get("site", a.siteId)?.resourceExcluded && entitlement(a).daily,
+            !this.store.get("site", a.siteId)?.resourceExcluded &&
+            !this.store.get("site", a.siteId)?.removed && entitlement(a).daily,
         )
         .map((a) => ({ accountId: a.id, ...entitlement(a) })),
       checkins: this.store.db

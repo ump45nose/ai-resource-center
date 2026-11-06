@@ -1,10 +1,4 @@
-import {
-  archiveOf,
-  isRemoved,
-  isInternal,
-  usageOf,
-  tagsOf,
-} from "./channel-rules.mjs";
+import { archiveOf, isRemoved, isInternal, tagsOf } from "./channel-rules.mjs";
 import { currentBalance, entitlement } from "./maintenance-policy.mjs";
 import { archiveChannel } from "./channel-health.mjs";
 import { observeSuccess } from "./failure-window.mjs";
@@ -121,7 +115,6 @@ export function archiveDepletedAccounts(store, accountIds) {
           !isRemoved(c) &&
           !isInternal(c) &&
           !archiveOf(c).length &&
-          usageOf(c) !== "rp" &&
           !tagsOf(c).includes("no_probe") &&
           !c.management?.fixed &&
           !c.management?.manualOnly &&

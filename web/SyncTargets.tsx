@@ -146,14 +146,12 @@ export default function SyncTargets() {
             </div>
             <p className="muted">
               {t.id === "newapi"
-                ? "非酒馆渠道 · 地址、模型、凭据及启停"
+                ? "渠道地址、模型、凭据及启停"
                 : t.id === "all-api-hub"
                   ? "签到入口与设置 · 账号登录仍由插件完成"
-                  : t.id === "sillytavern"
-                    ? "酒馆连接与排序 · 不切换当前选择"
-                    : t.id === "notion"
-                      ? "每站一条单向镜像 · 保留额外笔记"
-                      : "原生书签增量同步 · 保留非托管收藏"}
+                  : t.id === "notion"
+                    ? "每站一条单向镜像 · 保留额外笔记"
+                    : "原生书签增量同步 · 保留非托管收藏"}
             </p>
             <dl className="source-detail">
               <div>
@@ -229,7 +227,7 @@ export default function SyncTargets() {
             key={edit.version}
             onSubmit={save}
           >
-            {["newapi", "all-api-hub", "sillytavern"].includes(edit.id) && (
+            {["newapi", "all-api-hub"].includes(edit.id) && (
               <label>
                 绑定来源
                 <select
@@ -290,14 +288,10 @@ export default function SyncTargets() {
                 </label>
                 <p className="muted">
                   在 All API Hub
-                  中导入配对文件并单独开启书签同步；浏览器离线时任务保留。
+                  中导入配对文件并单独开启书签同步；浏览器离线时任务保留。酒馆目录保持
+                  RP 移出中心时的书签，之后在 Chrome 中自行维护。
                 </p>
               </>
-            )}
-            {edit.id === "sillytavern" && (
-              <p className="muted">
-                中心已提供连接下发、回执、原生保存和真实调用接口。酒馆插件安装后领取任务。
-              </p>
             )}
             {error && <p className="inline-error">{error}</p>}
             <Button type="submit" variant="primary" disabled={!!busy}>

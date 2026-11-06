@@ -12,7 +12,6 @@ export const usageLabels = {
   general: "通用",
   image: "生图",
   video: "视频",
-  rp: "酒馆",
 } as const;
 export type ChannelUsage = keyof typeof usageLabels;
 export const archiveLabels = {
@@ -257,7 +256,7 @@ export type Source = {
   id: string;
   version: number;
   name: string;
-  kind: "newapi" | "all-api-hub" | "sillytavern" | "cron";
+  kind: "newapi" | "all-api-hub" | "cron";
   url: string | null;
   enabled?: boolean;
   syncEnabled?: boolean;
@@ -435,7 +434,6 @@ export const sourceLabel = (kind: string) =>
   ({
     newapi: "New API",
     "all-api-hub": "All API Hub",
-    sillytavern: "SillyTavern",
     cron: "fn Cron",
   })[kind] || kind;
 export const dateTime = (value?: string | null) => {
@@ -486,27 +484,23 @@ export function channelStatus(c: Channel): { label: string; tone: Tone } {
     return { label: "人工暂停", tone: "neutral" };
   if (c.credentialStatus === "missing")
     return { label: "待补 key", tone: "amber" };
-  if (c.usage !== "rp") {
-    const sync = c.synchronization?.find((s) => s.target === "newapi");
-    if (
-      sync &&
-      !["applied", "not_applicable"].includes(sync.state) &&
-      syncStateLabels[sync.state]
-    )
-      return { label: `New API ${syncStateLabels[sync.state]}`, tone: "amber" };
-    if (c.runtimeEnabled === true)
-      return c.enabled
-        ? { label: "New API 已启用", tone: "green" }
-        : { label: "中心停用 · 网关启用", tone: "amber" };
-    if (c.sourceObservation?.present === false)
-      return { label: "网关中不存在", tone: "neutral" };
-    if (c.runtimeEnabled === false)
-      return { label: "New API 已停用", tone: "neutral" };
-    if (c.enabled) return { label: "New API 待接管", tone: "neutral" };
-  }
-  return c.enabled
-    ? { label: c.usage === "rp" ? "酒馆已启用" : "已启用", tone: "green" }
-    : { label: c.usage === "rp" ? "酒馆未启用" : "未启用", tone: "neutral" };
+  const sync = c.synchronization?.find((s) => s.target === "newapi");
+  if (
+    sync &&
+    !["applied", "not_applicable"].includes(sync.state) &&
+    syncStateLabels[sync.state]
+  )
+    return { label: `New API ${syncStateLabels[sync.state]}`, tone: "amber" };
+  if (c.runtimeEnabled === true)
+    return c.enabled
+      ? { label: "New API 已启用", tone: "green" }
+      : { label: "中心停用 · 网关启用", tone: "amber" };
+  if (c.sourceObservation?.present === false)
+    return { label: "网关中不存在", tone: "neutral" };
+  if (c.runtimeEnabled === false)
+    return { label: "New API 已停用", tone: "neutral" };
+  if (c.enabled) return { label: "New API 待接管", tone: "neutral" };
+  return { label: "未启用", tone: "neutral" };
 }
 
 export const isHubAccount = (account: Account) =>

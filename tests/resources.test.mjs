@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { issueToken } from "../server/auth.mjs";
-import { ingestRpCalls } from "../server/rp-calls.mjs";
 import { fixture } from "./helpers.mjs";
 
 test("nested transactions join the outer one and roll back together", async (t) => {
@@ -55,43 +54,52 @@ test("a rejected channel update leaves no partial writes", async (t) => {
   assert.equal(f.store.require("channel", f.channel.id).version, version);
 });
 
-test("RP calls from a token without channel scope are refused or acknowledged", async (t) => {
+test("inputs cannot create, move or revive channels in the RP usage", async (t) => {
   const f = await fixture(t);
-  const c = f.store.put("channel", {
-    ...f.store.require("channel", f.channel.id),
-    category: "rp",
-    usage: "rp",
-  });
-  const token = issueToken(f.store, "rp", { sourceId: "sillytavern" });
-  const event = {
-    eventId: "scoped",
-    channelId: c.id,
-    baseUrl: c.baseUrl,
-    protocol: c.protocol,
-    model: "model-A",
-    occurredAt: new Date().toISOString(),
-    origin: "live",
-    result: "success",
+  const data = {
+    siteId: f.site.id,
+    accountId: f.account.id,
+    name: "RP",
+    baseUrl: "https://upstream.test/v1",
   };
-  const send = (events, bearer = token) =>
-    f.call("POST", "/api/v1/rp/calls", { device: "fn:test", events }, bearer);
-  const denied = await send([event]);
-  assert.equal(denied.statusCode, 403, denied.body);
-  assert.equal(denied.json().message, "RP 连接未授权");
-  const { channelId, ...unbound } = event;
-  const ack = await send([{ ...unbound, eventId: "unbound" }]);
-  assert.equal(ack.statusCode, 200, ack.body);
-  assert.deepEqual(ack.json().acknowledgedIds, ["unbound"]);
-  const connections = await f.call("GET", "/api/v1/rp/connections", undefined, token);
-  assert.deepEqual(connections.json(), []);
-  assert.equal((await send([event], issueToken(f.store, "read"))).statusCode, 403);
-  const direct = ingestRpCalls(
-    { store: f.store, recompute() {} },
-    { call() {} },
-    { role: "rp", scope: {} },
-    { device: "fn:test", events: [{ ...unbound, eventId: "direct" }] },
+  for (const extra of [{ usage: "rp" }, { purpose: "rp" }]) {
+    const r = await f.call("POST", "/api/v2/channels", {
+      data: { ...data, ...extra },
+    });
+    assert.equal(r.statusCode, 400, r.body);
+  }
+  assert.throws(() => f.resources.channel({ ...data, purpose: "rp" }), {
+    code: "rp_out_of_center",
+  });
+  const { version } = f.store.require("channel", f.channel.id);
+  for (const changes of [{ usage: "rp" }, { purpose: "rp" }]) {
+    const r = await f.call("PATCH", `/api/v2/channels/${f.channel.id}`, {
+      version,
+      changes,
+    });
+    assert.equal(r.statusCode, 400, r.body);
+  }
+  const legacy = f.store.put("channel", {
+    ...f.store.require("channel", f.channel.id),
+    usage: "rp",
+    category: "rp",
+    enabled: false,
+    availability: "已移除",
+    management: { state: "removed" },
+  });
+  const revive = await f.call(
+    "POST",
+    `/api/v2/channels/${legacy.id}/lifecycle`,
+    { version: legacy.version, action: "archive", reason: "call" },
   );
-  assert.deepEqual(direct.acknowledgedIds, ["direct"]);
+  assert.equal(revive.statusCode, 409, revive.body);
+  assert.equal(revive.json().code, "rp_out_of_center");
+  assert.deepEqual(f.store.require("channel", legacy.id), legacy);
+  const note = await f.call("PATCH", `/api/v2/channels/${legacy.id}`, {
+    version: legacy.version,
+    changes: { note: "kept in SillyTavern" },
+  });
+  assert.equal(note.statusCode, 200, note.body);
 });
 
 test("hub credentials reuse a stored key by fingerprint", async (t) => {

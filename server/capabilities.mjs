@@ -13,7 +13,6 @@ import { Problem, publicValue } from "./errors.mjs";
 import { paginate, policies } from "./resources.mjs";
 import { listCheckins } from "./checkins.mjs";
 import { history } from "./history.mjs";
-import { rpEditSchema } from "./rp-sync.mjs";
 
 const text = z.string().min(1),
   url = z
@@ -23,7 +22,7 @@ const text = z.string().min(1),
       "需要 HTTP(S) 地址",
     );
 const version = z.number().int().positive();
-const purpose = z.enum(["general", "media", "rp", "client"]);
+const purpose = z.enum(["general", "media", "client"]);
 const listing = {
   q: z.string().optional(),
   cursor: z.string().optional(),
@@ -158,7 +157,7 @@ const policyFields = {
 };
 const sourceFields = {
   name: text,
-  kind: z.enum(["newapi", "all-api-hub", "cron", "sillytavern"]),
+  kind: z.enum(["newapi", "all-api-hub", "cron"]),
   url: url.nullable().optional(),
   enabled: z.boolean().optional(),
   userId: z.number().int().positive().optional(),
@@ -178,7 +177,6 @@ export function capabilities({
   evaluations,
   maintenance,
   distribution,
-  rp,
 }) {
   const all = [];
   const add = (
@@ -201,11 +199,6 @@ export function capabilities({
       write,
       ...options,
     });
-  add("list_rp_connections", "GET", "/rp/connections", "酒馆连接与同步状态", {channelId: text.optional()},
-    (a,auth) => { const result=rp.list(auth); return {...result,items:result.items.filter(b=>!a.channelId||b.channelId===a.channelId)}; },
-    false, { roles: ["rp", "connector"] });
-  add("update_rp_connection", "PATCH", "/rp/connections/:id", "修改酒馆连接，独立保存选定模型", {id:text,...rpEditSchema.shape},
-    (a,auth)=>rp.edit(auth,a.id,a),true);
   add(
     "capabilities",
     "GET",
@@ -231,7 +224,6 @@ export function capabilities({
       sourceSyncEnabled: sources.list().some((s) => s.syncEnabled),
       migration: store.setting("migration:channel-tags-v1"),
       legacyImport: store.setting("legacyImport"),
-      rpSyncVersion: 1,
       mediaValidation: false,
     }),
   );
@@ -272,7 +264,7 @@ export function capabilities({
     "bookmark_plan",
     "GET",
     "/bookmarks",
-    "按通用、生图、视频、酒馆及归档原因生成 Chrome 书签分类",
+    "按通用、生图、视频及归档原因生成 Chrome 书签分类；酒馆目录保持 RP 移出中心时的书签",
     {},
     () => bookmarkPlan(resources),
   );
@@ -458,7 +450,6 @@ export function capabilities({
   const targetId = z.enum([
     "newapi",
     "all-api-hub",
-    "sillytavern",
     "notion",
     "chrome-bookmarks",
   ]);

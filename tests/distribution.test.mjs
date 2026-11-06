@@ -29,14 +29,6 @@ const legacyCanonical = {
           )
         : v,
     ),
-  rpSync: (x) =>
-    JSON.stringify(x, (_k, v) =>
-      v && typeof v === "object" && !Array.isArray(v)
-        ? Object.fromEntries(
-            Object.entries(v).sort(([a], [b]) => a.localeCompare(b)),
-          )
-        : v,
-    ),
 };
 const legacyType = (protocol, remote) =>
   remote &&
@@ -96,19 +88,10 @@ async function receipt(f, token, body) {
   return r.json();
 }
 
-function rpChannel(f) {
-  return f.store.put("channel", {
-    ...f.store.require("channel", f.channel.id),
-    usage: "rp",
-    category: "rp",
-  });
-}
-
-const tavernToken = (f, c) =>
+const bookmarkToken = (f) =>
   issueToken(f.store, "connector", {
-    target: "sillytavern",
-    sourceId: "sillytavern",
-    channelIds: [c.id],
+    target: "chrome-bookmarks",
+    sourceId: "all-api-hub",
   });
 
 function hubAccount(f) {
@@ -191,8 +174,7 @@ test("shared canonical JSON reproduces every replaced implementation", async (t)
   assert.equal(same({ a: 1, b: [2] }, { b: [2], a: 1 }), true);
   assert.equal(same({ a: null }, {}), false);
   const f = await fixture(t);
-  rpChannel(f);
-  await adopt(f, "sillytavern");
+  await adopt(f, "chrome-bookmarks");
   const [job] = f.store.list("delivery");
   assert.equal(job.revision, hash(legacyCanonical.distribution(job.payload)));
   const input = { scope: { z: 1, a: [{ d: 1, c: 2 }] }, ids: ["b", "a"] };
@@ -322,25 +304,16 @@ test("gateway stages evaluation channels with the protocol's New API type", asyn
 
 test("connector receipts never persist plaintext keys or header values", async (t) => {
   const f = await fixture(t);
-  const c = rpChannel(f);
-  await adopt(f, "sillytavern");
-  const token = tavernToken(f, c);
+  await adopt(f, "chrome-bookmarks");
+  const token = bookmarkToken(f);
   const [job] = await claim(f, token);
-  assert.equal(job.payload.credential, "sk-fixture-private");
-  const managed = {
-    name: c.name,
-    baseUrl: c.baseUrl,
-    protocol: c.protocol,
-    models: c.models,
-    enabled: true,
-    order: 0,
-    credentialFingerprint: job.payload.credentialFingerprint,
-  };
+  assert.ok(!JSON.stringify(job).includes("sk-fixture-private"));
+  const managed = { rootId: "root-1", count: 1, folders: [] };
   await receipt(f, token, {
     id: job.id,
     lease: job.lease,
     state: "applied",
-    remoteId: "profile-1",
+    remoteId: "root-1",
     snapshot: {
       ...managed,
       credential: "sk-fixture-private",
@@ -368,129 +341,14 @@ test("connector receipts never persist plaintext keys or header values", async (
     "nested-password",
   ])
     assert.ok(!rows.includes(secret), `${secret} persisted`);
-  const link = f.store.require("targetLink", `sillytavern:${c.id}`);
+  const link = f.store.require("targetLink", "chrome-bookmarks:bookmarks");
   assert.equal(link.state, "applied");
-  assert.equal(link.remoteId, "profile-1");
+  assert.equal(link.remoteId, "root-1");
   assert.deepEqual(link.snapshot, { ...managed, nested: { keep: 1 } });
   assert.deepEqual(
     f.store.require("delivery", job.id).receipt.snapshot,
     link.snapshot,
   );
-});
-
-test("RP connector receipts drop secrets before comparing and saving", async (t) => {
-  const f = await fixture(t);
-  const scope = {
-    sourceId: "sillytavern",
-    rpInstanceId: "instance",
-    rpUserId: "user",
-  };
-  const rp = issueToken(f.store, "rp", { ...scope, rpRegistration: true });
-  const local = {
-    name: "RP",
-    baseUrl: "https://rp.test",
-    protocol: "OpenAI",
-    selectedModel: "",
-    order: 0,
-    enabled: true,
-    note: "",
-    credentialFingerprint: null,
-  };
-  const inventory = await f.call(
-    "POST",
-    "/api/v2/rp/inventory",
-    {
-      eventId: "inventory-1",
-      profiles: [{ nativeConnectionId: "native-1", snapshot: local }],
-    },
-    rp,
-  );
-  assert.equal(inventory.statusCode, 200, inventory.body);
-  const token = issueToken(f.store, "connector", {
-    ...scope,
-    target: "sillytavern",
-  });
-  const secrets = {
-    credential: "sk-rp-secret",
-    headers: { "x-relay-auth": "rp-header-secret" },
-  };
-  let [job] = await claim(f, token);
-  assert.deepEqual(
-    await receipt(f, token, {
-      id: job.id,
-      lease: job.lease,
-      state: "applied",
-      snapshot: { ...local, ...secrets },
-    }),
-    { acknowledged: true, id: job.id, state: "applied" },
-  );
-  const b = f.store.list("rpConnection")[0];
-  f.store.put("rpConnection", { ...b, name: "Center name" });
-  [job] = await claim(f, token);
-  await receipt(f, token, {
-    id: job.id,
-    lease: job.lease,
-    state: "conflict",
-    snapshot: { ...local, name: "Local name", ...secrets },
-  });
-  const conflict = f.store.require("rpConnection", b.id).conflict;
-  assert.deepEqual(conflict.local, { ...local, name: "Local name" });
-  const rows = f.store.db
-    .prepare("SELECT data FROM entities")
-    .all()
-    .map((r) => r.data)
-    .join("\n");
-  assert.ok(!rows.includes("sk-rp-secret"));
-  assert.ok(!rows.includes("rp-header-secret"));
-});
-
-test("adopting a connector's configuration is all-or-nothing", async (t) => {
-  const f = await fixture(t);
-  const c = rpChannel(f);
-  const d = f.app.services.distribution;
-  await adopt(f, "sillytavern");
-  const token = tavernToken(f, c);
-  const [job] = await claim(f, token);
-  await receipt(f, token, {
-    id: job.id,
-    lease: job.lease,
-    state: "conflict",
-    snapshot: {
-      name: "Local",
-      baseUrl: "not a url",
-      protocol: "OpenAI",
-      models: ["model-B"],
-      order: 1,
-      enabled: true,
-      credential: "sk-fixture-private",
-    },
-    reason: "酒馆配置已改变",
-  });
-  const linkId = `sillytavern:${c.id}`;
-  const link = f.store.require("targetLink", linkId),
-    delivery = f.store.require("delivery", job.id),
-    channel = f.store.require("channel", c.id);
-  assert.equal(link.state, "conflict");
-  assert.equal(delivery.state, "conflict");
-  assert.equal(link.conflictSnapshot.credential, undefined);
-  await assert.rejects(d.resolve(job.id, "target"), /Invalid URL/);
-  assert.deepEqual(f.store.require("targetLink", linkId), link);
-  assert.deepEqual(f.store.require("delivery", job.id), delivery);
-  assert.deepEqual(f.store.require("channel", c.id), channel);
-  f.store.put("targetLink", {
-    ...link,
-    conflictSnapshot: {
-      ...link.conflictSnapshot,
-      baseUrl: "https://local.test/v1",
-    },
-  });
-  assert.deepEqual(await d.resolve(job.id, "target"), { resolved: true });
-  const adopted = f.store.require("channel", c.id);
-  assert.equal(adopted.name, "Local");
-  assert.equal(adopted.baseUrl, "https://local.test");
-  assert.deepEqual(adopted.models, ["model-B"]);
-  assert.equal(f.store.require("targetLink", linkId).state, "applied");
-  assert.equal(f.store.require("delivery", job.id).state, "superseded");
 });
 
 test("All API Hub observations compare reported managed fields only", async (t) => {

@@ -14,7 +14,6 @@ type Job = {
 const targetLabels: Record<string, string> = {
   newapi: "New API · 渠道配置",
   "all-api-hub": "All API Hub · 账号与签到",
-  sillytavern: "酒馆",
   notion: "Notion",
   "chrome-bookmarks": "Chrome 书签",
 };

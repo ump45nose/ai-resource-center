@@ -117,7 +117,6 @@ export function entitlement(account, now = new Date()) {
 export function reviewManaged(store, c) {
   return (
     !probeBlock(store, c) &&
-    usageOf(c) !== "rp" &&
     !store.get("site", c.siteId)?.removed &&
     !store.get("site", c.siteId)?.mergedInto &&
     store.get("account", c.accountId)?.enabled !== false &&
@@ -283,9 +282,7 @@ export function maintenanceStatus(
       !balanceWaiting,
     validationWaitingFor: ["image", "video"].includes(usageOf(c))
       ? "等待 image-caption 生成验证适配"
-      : usageOf(c) === "rp"
-        ? "等待酒馆插件任务适配"
-        : null,
+      : null,
     reason,
     observedAt: c.callObservedAt || c.callIssue?.at || c.observedAt || null,
     lastCheckAt,
