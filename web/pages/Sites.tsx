@@ -306,7 +306,7 @@ export default function Sites() {
   }
   const gatewayCount = sites
     .flatMap((s) => s.channels)
-    .filter((c) => c.usage !== "rp" && c.runtimeEnabled === true).length;
+    .filter((c) => c.runtimeEnabled === true).length;
   return (
     <>
       <div className="summary-grid">
@@ -432,12 +432,6 @@ export default function Sites() {
               </button>
             ))}
           </div>
-        )}
-        {!archived && usage === "rp" && (
-          <p className="usage-note">
-            酒馆连接独立维护，不导入 New
-            API。标有「禁止测活」的渠道只采集真实调用。
-          </p>
         )}
         <div className="site-list">
           <div className="site-list-labels">
@@ -601,10 +595,7 @@ export default function Sites() {
                         >
                           {c.name}
                         </button>
-                        <span>
-                          {usageLabels[c.usage]} ·{" "}
-                          {c.usage === "rp" ? "酒馆维护" : "New API"}
-                        </span>
+                        <span>{usageLabels[c.usage]} · New API</span>
                         <div className="inline-tags">
                           {c.runtimeIssue && (
                             <Badge tone="amber">{c.runtimeIssue.reason}</Badge>

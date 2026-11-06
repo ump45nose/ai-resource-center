@@ -14,6 +14,7 @@ const sameHost = (origin, host) => !!host && webOrigin(origin)?.host === host;
 export function registerHttpSecurity(app, store) {
   app.addHook("onRequest", async (req, reply) => {
     const origin = req.headers.origin;
+    // Retired SillyTavern origins stay allowed so an old plugin can read its 410.
     if (
       origin &&
       (origin.startsWith("chrome-extension://") ||

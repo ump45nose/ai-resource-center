@@ -1,6 +1,11 @@
 import Fastify from "fastify";
 import { Distribution } from "./distribution.mjs";
-import { migrateChannels, migrateUsage } from "./migrations.mjs";
+import {
+  migrateChannels,
+  migrateUsage,
+  migrateRpRemoval,
+  migrateHubWriteBack,
+} from "./migrations.mjs";
 import { migrateHubKeys } from "./hub-keys.mjs";
 import { registerWeb } from "./web.mjs";
 import cookie from "@fastify/cookie";
@@ -29,8 +34,7 @@ import { ingestHubInventory, ingestHubCredentials } from "./hub-ingest.mjs";
 import { mcpRequest } from "./mcp.mjs";
 import { openapi } from "./openapi.mjs";
 import { registerHttpSecurity } from "./http-security.mjs";
-import { registerLegacy } from "./legacy.mjs";
-import { RpSync, registerRp } from "./rp-sync.mjs";
+import { registerLegacy, rpGone } from "./legacy.mjs";
 import {
   taskCatalogSchema,
   prepareSchema,
@@ -51,6 +55,8 @@ export async function createApp({
   migrateChannels(store);
   migrateUsage(store);
   migrateHubKeys(store);
+  migrateRpRemoval(store);
+  migrateHubWriteBack(store);
   const existingSources = store.setting("sources") || [];
   if (!existingSources.some((s) => s.id === "all-api-hub"))
     store.setting("sources", [
@@ -115,7 +121,6 @@ export async function createApp({
   sources.onInventory = (id, channels, startedAt) =>
     distribution.observeNewApi(id, channels, startedAt);
   const context = {
-    rp: new RpSync(store, resources),
     distribution,
     store,
     resources,
@@ -207,17 +212,8 @@ export async function createApp({
     if (req.auth.role !== "admin")
       throw new Problem(403, "只有管理员可创建接入凭据");
     const input = accessSchema.parse(req.body);
-    if (
-      ["ingest", "cron", "rp", "connector"].includes(input.role) &&
-      !input.sourceId
-    )
+    if (["ingest", "cron", "connector"].includes(input.role) && !input.sourceId)
       throw new Problem(400, "请绑定来源标识");
-    if (
-      (input.role === "rp" ||
-        (input.role === "connector" && input.target === "sillytavern")) &&
-      !input.channelIds?.length && !(input.rpInstanceId && input.rpUserId)
-    )
-      throw new Problem(400, "酒馆凭据必须绑定具体 RP 连接");
     if (input.role === "connector" && !input.target)
       throw new Problem(400, "执行凭据必须绑定目标");
     return {
@@ -225,18 +221,23 @@ export async function createApp({
         target: input.target,
         sourceId: input.sourceId,
         channelIds: input.channelIds || [],
-        rpInstanceId: input.rpInstanceId,
-        rpUserId: input.rpUserId,
-        rpRegistration: input.role === "rp" && input.rpRegistration === true,
       }),
     };
   });
+  const connector = (auth) => {
+    if (auth.role === "rp" || auth.scope?.target === "sillytavern")
+      throw rpGone();
+    return auth;
+  };
   app.get("/api/v2/connector/jobs", (req, reply) => {
     reply.header("Cache-Control", "no-store");
-    return req.auth.scope?.rpInstanceId ? context.rp.claim(req.auth) : distribution.claim(req.auth);
+    return distribution.claim(connector(req.auth));
   });
   app.post("/api/v2/connector/receipts", (req) =>
-    req.auth.scope?.rpInstanceId ? context.rp.receipt(req.auth, connectorReceiptSchema.parse(req.body)) : distribution.acknowledge(req.auth, connectorReceiptSchema.parse(req.body)),
+    distribution.acknowledge(
+      connector(req.auth),
+      connectorReceiptSchema.parse(req.body),
+    ),
   );
   app.post("/mcp", async (req, reply) => {
     const response = await mcpRequest(caps, req.auth, req);
@@ -320,7 +321,6 @@ export async function createApp({
     ),
   );
   registerLegacy(app, context);
-  registerRp(app, context.rp);
   operations.recover();
   const timer = worker
     ? setInterval(() => {

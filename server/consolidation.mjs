@@ -386,99 +386,6 @@ export function consolidateResources(store, legacy, apply = false) {
   }
 }
 
-// The retired duplicates retain keys that were omitted from their RP copies.
-const legacyRpKeyLinks = [
-  ["a5936660-f271-4a6c-acf7-dd7b80d36fd5", "3ed53610-0aa8-4767-926f-2e20684ea874"],
-  ["56314e05-adc9-45a7-9fd7-84d4cd38ca1b", "b7252eaa-378c-4d2e-8d11-a565f1880a64"],
-  ["619ea0c7-ccef-4c40-95d9-d84e9c0fb583", "dbcdcc45-4026-4ae4-b3d6-8265b3fe2a04"],
-  ["1911fdfa-0887-434f-a740-faa71ab305e9", "aba76ec3-0284-4929-b9f4-351a1f7863bc"],
-];
-
-// Confirmed against the saved profiles and their proxy credentials on fn.
-const legacyRpProfileLinks = [
-  [
-    "00e122d3-0856-4f5c-902a-9ba0a7efc0fe",
-    "5224de61-10e2-4d8a-8299-3f1031b66940",
-    "https://sunlea.de",
-  ],
-  [
-    "560b243a-ef24-487c-903a-157ffadbe708",
-    "9b0ffe56-621d-4f0b-ba41-05f1a6db54ca",
-    "https://ruoyun.icu",
-  ],
-];
-
-function recoverLegacyRpKeys(store, legacy) {
-  const recovered = [];
-  for (const [id, sourceId] of legacyRpKeyLinks) {
-    const current = store.require("channel", id);
-    if (current.credentialId || current.nativeCredentialRef) continue;
-    const row = legacy
-      .prepare("SELECT data FROM entities WHERE kind='channel' AND id=?")
-      .get(sourceId);
-    const original = JSON.parse(row.data);
-    if (
-      usageOf(current) !== "rp" ||
-      new URL(current.baseUrl).origin !== new URL(original.baseUrl).origin
-    )
-      throw new Error("酒馆凭据恢复的站点或用途不匹配");
-    const credential = legacy
-      .prepare("SELECT * FROM credentials WHERE id=?")
-      .get(original.credentialId);
-    if (!credential) throw new Error("旧版重复渠道的凭据不存在");
-    store.db
-      .prepare("INSERT OR REPLACE INTO credentials(id,value,fingerprint) VALUES(?,?,?)")
-      .run(credential.id, credential.value, credential.fingerprint);
-    const at = new Date().toISOString();
-    store.put("channel", {
-      ...current,
-      credentialId: credential.id,
-      credentialRecovery: {
-        source: "legacy-final-20261021-111818",
-        channelId: sourceId,
-        at,
-      },
-      connectionVersion: (current.connectionVersion || 1) + 1,
-      version: current.version + 1,
-    });
-    for (const o of store.list("offering").filter((o) => o.channelId === id))
-      store.put("offering", { ...o, verification: null });
-    store.action(id, { kind: "restore_rp_key", sourceChannelId: sourceId, at });
-    recovered.push({ id, name: current.name, sourceChannelId: sourceId });
-  }
-  for (const [id, profileId, origin] of legacyRpProfileLinks) {
-    const current = store.require("channel", id);
-    if (current.credentialId || current.nativeCredentialRef) continue;
-    if (usageOf(current) !== "rp" || new URL(current.baseUrl).origin !== origin)
-      throw new Error("酒馆原生凭据恢复的站点或用途不匹配");
-    const at = new Date().toISOString();
-    store.put("channel", {
-      ...current,
-      nativeCredentialRef: { profileId, device: "fn:default-user" },
-      credentialRecovery: { source: "sillytavern", profileId, at },
-      connectionVersion: (current.connectionVersion || 1) + 1,
-      version: current.version + 1,
-    });
-    for (const o of store.list("offering").filter((o) => o.channelId === id))
-      store.put("offering", { ...o, verification: null });
-    store.action(id, { kind: "restore_native_credential_ref", profileId, at });
-    recovered.push({ id, name: current.name, sourceProfileId: profileId });
-  }
-  return recovered;
-}
-
-export function restoreLegacyRpCredentials(store, legacy, apply = false) {
-  store.db.exec("BEGIN IMMEDIATE");
-  try {
-    const recovered = recoverLegacyRpKeys(store, legacy);
-    store.db.exec(apply ? "COMMIT" : "ROLLBACK");
-    return { applied: apply, recovered };
-  } catch (error) {
-    store.db.exec("ROLLBACK");
-    throw error;
-  }
-}
-
 // Restore the complete reviewed inventory, not only records touched by a merge.
 export function restoreFinalResources(store, legacy, apply = false) {
   const source = "legacy-final-20261021-111818",
@@ -671,7 +578,6 @@ export function restoreFinalResources(store, legacy, apply = false) {
           .filter((o) => o.channelId === old.id))
           store.put("offering", { ...o, verification: null });
     }
-    report.recoveredRpCredentials = recoverLegacyRpKeys(store, legacy);
     for (const row of legacy.prepare("SELECT * FROM refs").all())
       if (
         ["site", "account", "channel"].includes(row.kind) &&

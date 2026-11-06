@@ -133,6 +133,18 @@ test("CORS skips unusable stored source URLs and never allows opaque origins", a
     assert.equal(r.statusCode, 200, r.body);
     assert.equal(r.headers["access-control-allow-origin"], undefined, origin);
   }
+  const retired = await f.app.inject({
+    url: "/api/v1/rp/connections",
+    headers: {
+      origin: "https://tavern.test",
+      authorization: `Bearer ${issueToken(f.store, "rp", { sourceId: "st" })}`,
+    },
+  });
+  assert.equal(retired.statusCode, 410);
+  assert.equal(
+    retired.headers["access-control-allow-origin"],
+    "https://tavern.test",
+  );
 });
 
 test("history answers channel-less sites and filters changes by target", async (t) => {
@@ -171,7 +183,7 @@ test("history answers channel-less sites and filters changes by target", async (
   );
 });
 
-test("capability roles admit RP credentials to their connection list only", async (t) => {
+test("retired RP credentials and SillyTavern connectors reach nothing", async (t) => {
   const f = await fixture(t);
   const scope = {
     sourceId: "sillytavern",
@@ -184,21 +196,22 @@ test("capability roles admit RP credentials to their connection list only", asyn
     issueToken(f.store, "connector", { ...scope, target: "sillytavern" }),
   ];
   for (const token of tokens) {
-    const list = await f.call(
-      "GET",
-      "/api/v2/rp/connections",
-      undefined,
-      token,
-    );
-    assert.equal(list.statusCode, 200, list.body);
-    assert.deepEqual(list.json().items, []);
+    for (const [method, url, payload] of [
+      ["GET", "/api/v2/connector/jobs"],
+      ["POST", "/api/v2/connector/receipts", { id: "x", lease: "y", state: "applied" }],
+    ]) {
+      const r = await f.call(method, url, payload, token);
+      assert.equal(r.statusCode, 410, `${url}: ${r.body}`);
+      assert.equal(r.json().code, "gone");
+    }
     assert.equal(
       (await f.call("GET", "/api/v2/sites", undefined, token)).statusCode,
       403,
     );
     assert.equal(
-      (await f.call("PATCH", "/api/v2/rp/connections/x", {}, token)).statusCode,
-      403,
+      (await f.call("GET", "/api/v2/rp/connections", undefined, token))
+        .statusCode,
+      404,
     );
     const mcp = await f.app.inject({
       method: "POST",
@@ -208,17 +221,26 @@ test("capability roles admit RP credentials to their connection list only", asyn
     });
     assert.equal(mcp.statusCode, 403, mcp.body);
   }
-  const ingest = issueToken(f.store, "ingest", { sourceId: "all-api-hub" });
-  assert.equal(
-    (await f.call("GET", "/api/v2/rp/connections", undefined, ingest))
-      .statusCode,
-    403,
-  );
+  for (const body of [
+    { role: "rp", sourceId: "sillytavern", channelIds: [f.channel.id] },
+    { role: "connector", sourceId: "sillytavern", target: "sillytavern" },
+  ])
+    assert.equal((await f.call("POST", "/api/v2/access", body)).statusCode, 400);
+  const tools = (
+    await f.app.inject({
+      method: "POST",
+      url: "/mcp",
+      headers: {
+        ...mcpHeaders,
+        authorization: `Bearer ${issueToken(f.store, "manage")}`,
+      },
+      payload: listTools,
+    })
+  ).json().result.tools;
+  assert.ok(!tools.some((tool) => /_rp_/.test(tool.name)));
+  const spec = (await f.app.inject({ url: "/openapi.json" })).json();
+  assert.ok(!Object.keys(spec.paths).some((p) => /\/rp\b|rp-calls/.test(p)));
   const read = issueToken(f.store, "read");
-  assert.equal(
-    (await f.call("GET", "/api/v2/rp/connections", undefined, read)).statusCode,
-    200,
-  );
   assert.equal(
     (
       await f.call(

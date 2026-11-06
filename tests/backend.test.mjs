@@ -133,10 +133,10 @@ test("source preview, synchronization, preserved purpose and request idempotency
   await f.app.services.operations.drain();
   const id = f.store.ref(source.id, "channel", "5"),
     imported = f.store.require("channel", id);
-  f.store.put("channel", { ...imported, category: "rp", note: "manual note" });
+  f.store.put("channel", { ...imported, category: "media", note: "manual note" });
   await f.sources.sync(source.id);
   assert.equal(f.store.list("channel").length, 2);
-  assert.equal(f.store.require("channel", id).category, "rp");
+  assert.equal(f.store.require("channel", id).category, "media");
   assert.equal(f.store.require("channel", id).note, "manual note");
   f.sources.update(source.id, { version: "v1.0.0-rc.45" });
   assert.equal(f.sources.list().find((s) => s.id === source.id).version, 1);
@@ -152,30 +152,29 @@ test("source preview, synchronization, preserved purpose and request idempotency
 
 test("scan distinguishes website failure and protects the same no-probe credential", async (t) => {
   const f = await fixture(t);
-  const rpSite = f.resources.site({
-    name: "RP",
+  const guarded = f.resources.site({
+    name: "Guarded",
     url: "https://rp.test",
     aliases: ["https://rp-api.test"],
   });
-  f.store.put("account", { id: "rp-account", siteId: rpSite.id, name: "RP" });
-  const rp = f.resources.channel({
-    siteId: rpSite.id,
-    accountId: "rp-account",
-    name: "RP",
-    purpose: "rp",
+  f.store.put("account", { id: "guarded", siteId: guarded.id, name: "Guarded" });
+  const noProbe = f.resources.channel({
+    siteId: guarded.id,
+    accountId: "guarded",
+    name: "No probe",
     tags: ["no_probe"],
     baseUrl: "https://rp.test",
   });
   const duplicate = f.resources.channel({
-    siteId: rpSite.id,
-    accountId: "rp-account",
+    siteId: guarded.id,
+    accountId: "guarded",
     name: "Alias",
     baseUrl: "https://rp-api.test",
-    credentialId: f.store.secret("shared-rp-key"),
+    credentialId: f.store.secret("shared-guarded-key"),
   });
   f.store.put("channel", {
-    ...rp,
-    credentialId: f.store.secret("shared-rp-key"),
+    ...noProbe,
+    credentialId: f.store.secret("shared-guarded-key"),
   });
   const result = await f.call("POST", "/api/v2/scans", {
     requestId: "scan-all",
@@ -198,7 +197,7 @@ test("scan distinguishes website failure and protects the same no-probe credenti
       (r) => r.url.includes("rp.test") || r.url.includes("rp-api.test"),
     ),
   );
-  assert.equal(eligible(f.store, rp), false);
+  assert.equal(eligible(f.store, noProbe), false);
   assert.equal(eligible(f.store, duplicate), false);
   const publicResult = (await f.call("GET", `/api/v2/operations/${op.id}`))
     .body;
@@ -531,53 +530,42 @@ test("MCP uses the same resource service and limits read-only access", async (t)
   assert.ok(!result.body.includes("sk-fixture-private"));
 });
 
-test("legacy RP passive events are acknowledged without any upstream requests", async (t) => {
+test("retired SillyTavern endpoints fail loudly and record nothing", async (t) => {
   const f = await fixture(t);
-  const c = f.store.require("channel", f.channel.id);
-  f.store.put("channel", {
-    ...c,
-    category: "rp",
-    usage: "rp",
-    tags: ["no_probe", "no_code"],
-  });
   const token = issueToken(f.store, "rp", {
     sourceId: "sillytavern",
-    channelIds: [c.id],
+    channelIds: [f.channel.id],
   });
-  const config = await f.call(
-    "GET",
-    `/api/v1/rp/${c.id}/config`,
-    undefined,
-    token,
-  );
-  assert.equal(config.statusCode, 200);
-  assert.deepEqual(config.json().headers, []);
   const event = {
     eventId: "live-call",
-    channelId: c.id,
-    baseUrl: c.baseUrl,
-    protocol: c.protocol,
+    channelId: f.channel.id,
     model: "model-A",
     occurredAt: new Date().toISOString(),
     origin: "live",
     result: "success",
   };
-  for (let i = 0; i < 2; i++) {
-    const r = await f.call(
-      "POST",
-      "/api/v1/rp/calls",
-      { device: "fn:test", events: [event] },
-      token,
-    );
-    assert.equal(r.statusCode, 200, r.body);
+  for (const [method, url, payload] of [
+    ["GET", "/api/v1/rp/connections"],
+    ["GET", `/api/v1/rp/${f.channel.id}/config`],
+    ["POST", "/api/v1/rp/calls", { device: "fn:test", events: [event] }],
+    ["POST", `/api/v1/rp/${f.channel.id}/saved`, { eventId: "saved" }],
+  ]) {
+    const r = await f.call(method, url, payload, token);
+    assert.equal(r.statusCode, 410, `${url}: ${r.body}`);
+    assert.equal(r.json().code, "gone");
+    assert.match(r.json().message, /酒馆/);
   }
-  assert.equal(f.store.db.prepare("SELECT COUNT(*) n FROM calls").get().n, 1);
-  assert.equal(f.net.requests.length, 0);
   assert.equal(
-    (await f.call("POST", "/api/v2/scans", { requestId: "rp-scan" }))
-      .statusCode,
-    202,
+    (await f.app.inject({ url: "/api/v1/rp/connections" })).statusCode,
+    401,
   );
-  await f.app.services.operations.drain();
+  for (const [method, url] of [
+    ["GET", "/api/v2/rp/connections"],
+    ["POST", "/api/v2/rp/inventory"],
+    ["POST", "/api/v2/ingest/rp-calls"],
+  ])
+    assert.equal((await f.call(method, url, {})).statusCode, 404, url);
+  assert.equal(f.store.db.prepare("SELECT COUNT(*) n FROM calls").get().n, 0);
+  assert.equal(f.store.db.prepare("SELECT COUNT(*) n FROM events").get().n, 0);
   assert.equal(f.net.requests.length, 0);
 });

@@ -23,7 +23,7 @@ node scripts/access.mjs /data cron /data/cron-access.json fn-cron
 
 ## 来源接入与同步
 
-本轮已完成 New API 拉取、历史资料迁入，以及 All API Hub 的账号、余额、签到和 key 持续上报；SillyTavern 新版持续同步按[来源同步方案](source-sync.md)留到下一批。下述 CPA 适配与验证是此前实施记录，第一版不启用，也不新增 CPA 同步任务。
+本轮已完成 New API 拉取、历史资料迁入，以及 All API Hub 的账号、余额、签到和 key 持续上报；SillyTavern 原计划下一批接入，2026-11-06 决定不再接入（见文末）。下述 CPA 适配与验证是此前实施记录，第一版不启用，也不新增 CPA 同步任务。
 
 1. `POST /api/v2/sources` 创建来源，正文为 `{ "data": { "name": "名称", "kind": "newapi", "url": "网关地址", "userId": 1 } }`。支持 New API 和客户端上报来源；CPA 不再允许创建或同步。
 2. `PUT /sources/{id}/credential` 保存管理凭据，正文为 `version, key`，不回显。
@@ -61,7 +61,7 @@ python3 integrations/cron_adapter.py --config /私密路径/cron-access.json \
 
 运行结束使用同一 runId 调用 result，包含实际 channelId、原始 modelId、result、occurredAt、usedFallback，以及能确认的 acceptance。适配器先保存私密待发回执再上传，失败后只补交结果，不重跑业务。任务结果不再作为一条额外请求计入调用账本。
 
-当前未选择或修改用户的业务 cron，适配器不自动插入 Hermes 调度器。现有 Hermes 的立即运行会改变暂停状态，本实现不调用该入口。酒馆新版联动与客户端配置分发属于下一阶段；旧版 RP 被动上报和已保存连接接口继续兼容。
+当前未选择或修改用户的业务 cron，适配器不自动插入 Hermes 调度器。现有 Hermes 的立即运行会改变暂停状态，本实现不调用该入口。客户端配置分发属于下一阶段；旧版 RP 接口已于 2026-11-06 退役。
 
 已只读接入 Lingjun 的 91 个任务，其中 38 个暂停；尚无任务声明完成单次配置适配，所以不会启动任务验证。后续按所选任务接入 prepare/result，再将该任务标记为已适配。
 
@@ -72,7 +72,7 @@ python3 integrations/cron_adapter.py --config /私密路径/cron-access.json \
 - HTTP 与 MCP 共用能力定义；提供 OpenAPI、来源同步进度、扫描结果和任务回执。
 - cron 由既有执行层调用 prepare／result，不使用会恢复暂停任务的立即运行接口。
 - 标签规则已接入：“禁止测活”排除主动请求，其他标签约束任务和配置分发；旧 RP 迁移禁止测活／禁止代码。生图视频验证等待 image-caption。
-- 完整历史渠道与失败记录已迁入；调用归属不再按 RP 分类排除。独立应用绑定编辑及新版酒馆接口仍待下一批。
+- 完整历史渠道与失败记录已迁入；调用归属不再按 RP 分类排除。独立应用绑定编辑仍待下一批，酒馆接口不再实现。
 - 验证集中在实现结束后进行。没有选择业务 cron 前，不启动真实业务任务。
 
 ## 验证范围
@@ -170,3 +170,22 @@ WebUI 的“扫描与测试”提供批量只扫描／扫描并验证、模型�
 已知未改：同步任务载荷的 `headerValues` 和 New API 快照的 `header_override` 仍以明文存在数据库中。改为引用或摘要需要迁移已保存的快照，否则回读比较会误报冲突，留待单独处理。
 
 验证：44 项接口场景、类型检查与构建、OpenAPI 一致性检查；本地浏览器对比改动前后 14 个界面状态，布局无差异。本轮只在本地提交，尚未部署 fn。
+
+## 2026-11-06：RP 渠道移出中心
+
+RP 渠道整体移出中心，只在酒馆和 Chrome 书签中管理；酒馆双向协议从未接通，一并移除。
+
+- 删除 `server/rp-sync.mjs`、`server/rp-calls.mjs`、`web/RpConnections.tsx`；移除 `/api/v2/rp/*`、`/api/v2/ingest/rp-calls`、`resource_list_rp_connections`、`resource_update_rp_connection`、`sillytavern` 同步目标、`rp` 接入角色、`target=sillytavern` 执行凭据（`/api/v2/access` 与 `scripts/access.mjs`）以及 `consolidate-resources --restore-rp-keys`。`/api/v1/rp/*` 和旧酒馆执行凭据返回 `410 gone`。
+- 用途只剩通用／生图／视频：新建或修改为 RP 用途返回 400，重新启用已移出的 RP 渠道返回 `409 rp_out_of_center`。概览的渠道计数不再有 `rp`。
+- 启动迁移 `migrateRpRemoval` 一次性软移除 RP 渠道和只剩 RP 的站点，规则与撤销见[数据约束](data-contract.md#rp-渠道移出中心)。New API 分发不再包含 RP 渠道（原有任务转为 superseded，网关中的历史渠道不改动），Notion 不再显示；书签计划冻结酒馆目录，迁移前后逐字节一致，不产生书签任务。
+- 来源列表与调用覆盖不再列出酒馆来源；酒馆来源地址只留在 CORS 白名单里，让旧插件能读到 410 说明。
+- 部署后需要：停用旧版酒馆中心同步插件；插件侧补“释放托管”指令后，才能把酒馆目录交给主人手动维护（见[外部对接说明](integration-handoff.md#chrome-书签酒馆目录)）。
+
+## 2026-11-06：All API Hub 只回写自动签到开关
+
+名称、地址、签到入口和账号启停以插件为准；中心只在签到归档或改由独立签到账号执行时停止自动签到，解除后恢复。插件无需更新。
+
+- 同步任务只保存中心决定；领取时按最近回执与清单中较新且完整的一份，回显插件当前的名称、`customCheckIn.url` 和停用状态。任务只在决定变化且与插件当前开关不同时产生；当前值不完整时不下发，同步状态显示等待原因。
+- 插件按自身旧快照报冲突时，中心用回执中的当前值带 `force` 重发；插件已是目标开关则作废。名称、地址类冲突不再出现；启动迁移 `migrateHubWriteBack` 清除旧冲突与未完成的旧任务。
+- 站点详情显示插件当前值和中心决定；账号编辑中的启停与签到需求标明只在中心生效。New API、Notion 与书签的同步修订不受影响。
+- 首次部署时，已归档或已代签、但插件仍开着自动签到的账号会收到一次停止任务（旧版本也是这样决定的，只是可能卡在冲突里）。

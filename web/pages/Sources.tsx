@@ -162,9 +162,7 @@ export default function Sources() {
               <div className="source-scopes">
                 {(pull
                   ? ["渠道配置", "模型列表", "调用日志"]
-                  : s.kind === "all-api-hub"
-                    ? ["账号资料", "余额观察", "签到历史", "调用 key"]
-                    : ["酒馆连接", "被动调用记录"]
+                  : ["账号资料", "余额观察", "签到历史", "调用 key"]
                 ).map((l) => (
                   <span key={l}>{l}</span>
                 ))}

@@ -87,7 +87,7 @@ export function callReport(store, raw) {
     page: q.page,
     limit: q.limit,
     coverage: (store.setting("sources") || [])
-      .filter((s) => ["newapi", "cpa", "sillytavern"].includes(s.kind))
+      .filter((s) => ["newapi", "cpa"].includes(s.kind))
       .map(({ id, name, last, error, coverage }) => ({
         id,
         name,

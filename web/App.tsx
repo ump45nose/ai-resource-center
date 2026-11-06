@@ -461,7 +461,8 @@ export default function App() {
               </div>
             </dl>
             <p>
-              测试权限按渠道标签判断，酒馆绑定不再等于禁止测活。CPA 本版不接入。
+              测试权限按渠道标签判断。RP 渠道只在酒馆和 Chrome
+              书签中管理，CPA 本版不接入。
             </p>
             <a
               className="text-link"

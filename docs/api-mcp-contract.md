@@ -1,8 +1,8 @@
 # 公益资源服务：HTTP／MCP 能力契约
 
-2026-10-23 能力约定。服务端已提供基础管理、来源同步、扫描、任务验证与配置分发；实际实现的请求和路径见 [OpenAPI](openapi.json)，运行及启用条件见[服务端说明](backend.md)。酒馆插件由其负责人接入，本文不规定 Hub 布局。
+2026-10-23 能力约定。服务端已提供基础管理、来源同步、扫描、任务验证与配置分发；实际实现的请求和路径见 [OpenAPI](openapi.json)，运行及启用条件见[服务端说明](backend.md)。本文不规定 Hub 布局。
 
-本轮按[来源接入与数据同步](source-sync.md)补齐 All API Hub、New API 和 SillyTavern 接口；CPA 不接入。浏览器扩展需更新后接收下发，酒馆新版双向接口等待插件联调。
+本轮按[来源接入与数据同步](source-sync.md)补齐 All API Hub 和 New API 接口；CPA 不接入。浏览器扩展需更新后接收下发。2026-11-06 起 RP 渠道移出中心，SillyTavern 相关接口已移除（见[产品需求](requirements.md#rp-渠道不在中心管理)）。
 
 ## 统一管理与分发（2026-10-23 已实现）
 
@@ -10,11 +10,12 @@
 
 - `GET /channels/{id}/credentials`、`POST /channels/{id}/credentials/select`：同账号凭据选择，提交 `version,choiceId`。更换 key 创建独立密文，不覆盖其他连接正在引用的凭据。
 - `POST /channels/{id}/lifecycle`：`version,action=archive|pause|resume|review|remove,reason,note,recoveryEnabled`。归档原因限六类；恢复人工暂停保留原归档；复查不立即启用；永久移除不可自动恢复。
-- `GET /sync/targets`、`PATCH /sync/targets/{id}`：目标为 `newapi,all-api-hub,sillytavern,notion,chrome-bookmarks`，各自启停和版本。
+- `GET /sync/targets`、`PATCH /sync/targets/{id}`：目标为 `newapi,all-api-hub,notion,chrome-bookmarks`，各自启停和版本。
 - `POST /sync/targets/{id}/preview`、`POST /sync/targets/{id}/confirm`：确认提交 `previewId,subjectIds`，只接管选中项目；未选存量不写回，资料变化后必须重新预览。已有停用连接仅同步停用，不重写历史模型和兼容配置。
 - `GET /sync/jobs?target=&subject=`、`GET /sync/jobs/{id}/diff`、`POST /sync/jobs/{id}/retry`、`POST /sync/jobs/{id}/resolve`：处理任务、非秘密差异和冲突；选择 `choice=target|center`。镜像不接受反向采用。
 - `PUT /sync/targets/notion/credential`：提交 `version,key`，密文留在 fn。Notion 仅更新约定字段，按中心标识及唯一网站关联既有条目。
-- `GET /connector/jobs`、`POST /connector/receipts`：只接受独立 `connector` 授权，绑定来源和目标；不是原 `ingest` 的额外权限。RP 授权还须绑定 `channelIds`。任务领取含两分钟租约；回执按任务和租约去重。
+- `GET /connector/jobs`、`POST /connector/receipts`：只接受独立 `connector` 授权，绑定来源和目标（`all-api-hub` 或 `chrome-bookmarks`）；不是原 `ingest` 的额外权限。绑定 `sillytavern` 的旧凭据和 `rp` 凭据返回 `410`（`code: gone`）。任务领取含两分钟租约；回执按任务和租约去重。
+- All API Hub 账号任务只在中心的自动签到决定变化、且与插件当前开关不同时产生。`payload.automaticExecutionEnabled` 是中心决定，`payload.reason` 为 `archived/delegated/restored`；`name`、`checkinUrl`（`customCheckIn.url` 或 null）、`disabled` 是领取时插件的当前值，`expected` 同为当前值。插件冲突回执若只因插件字段变化，任务以 `force` 重新排队；插件已是目标开关时任务作废。中心不再为名称、地址、签到入口或启停报冲突；当前值不完整时不产生任务，`/sync/jobs` 返回 `retryable:false` 的计算行说明等待原因。站点详情的账号 `integration` 增加 `extension`（插件当前值）和 `automaticCheckin`（中心决定）。
 
 任务状态 `pending/running/applied/waiting/failed/conflict/superseded` 表示配置同步状态，不是模型验证结论。中心保存先入队；浏览器离线不显示已生效。账号与签到、New API 渠道分别显示同步结果；渠道启停采用网关实际观察或写入回读。来源回流发现托管字段变化时显示冲突，由用户采用目标配置或恢复中心配置。普通查询和 MCP 不返回 key、认证请求头或原生凭据引用。
 
@@ -26,11 +27,11 @@
 
 HTTP 用 OpenAPI 3.1 描述请求、响应和错误；MCP 工具提供输入及输出 schema，返回结构化业务结果。两者使用同一业务服务、对象 ID 和权限，不维护两份数据。[OpenAPI](https://spec.openapis.org/oas/v3.1.1.html)、[MCP Tools](https://modelcontextprotocol.io/specification/2025-11-25/server/tools) 是协议依据；可供客户端生成代码的完整 schema 在接口实现阶段随代码交付。
 
-WebUI 使用资源服务的用户会话；Hub 沿用已有用户登录，hub-api 通过服务凭据转发授权操作。资源服务校验来源和操作范围，业务动作不以浏览器 Cookie 作为唯一调用方式。MCP 复用 fn 已有服务认证接入方式。浏览器上报和配置下发使用不同的受限凭据；酒馆凭据限其 RP 绑定；网关管理凭据留在 fn。普通查询不返回明文 key。
+WebUI 使用资源服务的用户会话；Hub 沿用已有用户登录，hub-api 通过服务凭据转发授权操作。资源服务校验来源和操作范围，业务动作不以浏览器 Cookie 作为唯一调用方式。MCP 复用 fn 已有服务认证接入方式。浏览器上报和配置下发使用不同的受限凭据；网关管理凭据留在 fn。普通查询不返回明文 key。`POST /api/v2/access` 可签发的角色为 `read/manage/ingest/cron/connector`。
 
 WebUI 提供可直接打开的站点、模型筛选和运行记录链接，Hub 可跳转具体对象，不必复刻完整管理页。导航链接只定位对象，不携带 key、会话或调用凭据。具体页面路径在前端实现时与 Hub 接入方一起公布。
 
-本轮已实现通用／生图／视频／酒馆四个用途分组、状态列限制标签、六类归档、应用信息查询、New API 分项同步以及真实 WebUI。`PATCH /api/v2/channels/:id` 可修改 `usage`；`GET /api/v2/bookmarks` 返回同一份书签分类，MCP 对应 `resource_bookmark_plan`。酒馆分组不允许导入 New API；禁止测活仍由标签独立控制。独立 ApplicationBinding 编辑仍为后续契约；现有绑定继续保留，酒馆下发需插件接管后执行。
+本轮已实现通用／生图／视频三个用途分组、状态列限制标签、六类归档、应用信息查询、New API 分项同步以及真实 WebUI。`PATCH /api/v2/channels/:id` 可修改 `usage`（`general/image/video`）；新建或修改为 RP 用途会被拒绝，重新启用已移出的 RP 渠道返回 `409 rp_out_of_center`。`GET /api/v2/bookmarks` 返回同一份书签分类，MCP 对应 `resource_bookmark_plan`；其中“酒馆”目录保持 RP 移出中心时的条目（见[外部对接说明](integration-handoff.md#chrome-书签酒馆目录)）。禁止测活仍由标签独立控制。独立 ApplicationBinding 编辑仍为后续契约。
 
 ## 接入方共同使用的数据
 
@@ -56,7 +57,7 @@ WebUI 提供可直接打开的站点、模型筛选和运行记录链接，Hub �
 - `recovery`：最近失败原因与时间、最后／下次检查、等待条件和是否参加恢复。失败渠道与成功渠道使用同一 Channel 对象。
 - `capabilityClass`：模型的 `strong/execution/unclassified`，不代替渠道限制。
 
-旧 `rp` 迁移 `no_probe + no_code` 并保留酒馆绑定，旧 `client` 按已有要求迁移 `client_restricted`；`code_only/no_nsfw` 只按明确规则设置。旧数据保留原分类作为迁移来源，现有 API／OpenAPI 的单值字段在实施时适配，不只改文档就移除旧调用入口。新版查询支持 `capability, tag, application, recoveryState`，多标签采用同时满足语义。
+旧 `client` 按已有要求迁移 `client_restricted`；`code_only/no_nsfw` 只按明确规则设置。`purpose` 只接受 `general/media/client`，旧 `rp` 记录已移出中心。旧数据保留原分类作为迁移来源，现有 API／OpenAPI 的单值字段在实施时适配，不只改文档就移除旧调用入口。新版查询支持 `capability, tag, application, recoveryState`，多标签采用同时满足语义。
 
 不同模型名称的映射只采用已确认映射；不能仅凭相似名称合并模型指标。
 
@@ -64,7 +65,7 @@ WebUI 提供可直接打开的站点、模型筛选和运行记录链接，Hub �
 
 所有可编辑对象携带 `version`。写入提交读取时的版本；发生并发修改时返回当前值和冲突字段，用户或调用方重新选择。时间用带时区的 ISO 8601，规则同时保存 IANA 时区。列表返回 `items, nextCursor`；未知数值用 `null`，单位随数值返回。
 
-渠道与应用绑定分别使用自己的配置 `version`；余额、调用和来源观察刷新不增加这些版本，避免正常同步或切换酒馆模型造成共享配置冲突。
+渠道与应用绑定分别使用自己的配置 `version`；余额、调用和来源观察刷新不增加这些版本，避免正常同步造成共享配置冲突。
 
 ## 日常查询与维护
 
@@ -86,7 +87,7 @@ WebUI 提供可直接打开的站点、模型筛选和运行记录链接，Hub �
 | 查看／修改维护策略 | `GET/PATCH /policies` | `resource_get_policies`、`resource_update_policies` | 适用站点、扫描周期、候选数量、验证任务、消耗上限与提醒偏好 |
 | 查看／处理提醒 | `PATCH /attention/{id}` | `resource_update_attention` | 已读、稍后提醒；不把忽略提醒当成问题已解决 |
 
-创建、修改和补 key 只保存资料；自动维护由已启用策略安排。绑定酒馆不自动禁止测试，所有保存动作均不启动上游请求；是否允许主动检查由 `no_probe` 决定。合并和批量改动先预览是为了让用户知道影响哪些账号和连接；普通单条编辑无需多一步确认。
+创建、修改和补 key 只保存资料；自动维护由已启用策略安排。所有保存动作均不启动上游请求；是否允许主动检查由 `no_probe` 决定。合并和批量改动先预览是为了让用户知道影响哪些账号和连接；普通单条编辑无需多一步确认。
 
 ## 长任务返回进度，不占住客户端
 
@@ -116,7 +117,7 @@ WebUI 提供可直接打开的站点、模型筛选和运行记录链接，Hub �
 
 HTTP 接受后返回 `202` 和 `{ "operationId": "example-operation", "state": "queued" }`；MCP 返回同一业务对象。`succeeded` 表示该操作完成，不统一代替模型质量评价；最终结果中分别给出任务通过、模型评价和配置应用结果。
 
-## cron、配置和 RP 对接
+## cron 与配置对接
 
 | 能力 | HTTP | MCP／调用方 |
 | --- | --- | --- |
@@ -125,11 +126,7 @@ HTTP 接受后返回 `202` 和 `{ "operationId": "example-operation", "state": "
 | 接收任务结果 | `POST /ingest/task-results` | 仅受信任的任务适配器调用 |
 | 生成目标配置 | `POST /configurations` | `resource_prepare_configuration`；输入目标和渠道，返回制品引用、适用客户端及同步状态 |
 | 获取配置／提交应用回执 | `GET /configurations/{id}`、`POST /configurations/{id}/receipt` | 绑定客户端；密钥配置不进入通用查询或 MCP 文本结果 |
-| 查询 RP 连接 | `GET /rp/connections` | `resource_list_rp_connections`；返回酒馆应用绑定及关联渠道，过滤实例，读取不访问上游。`rp`／`connector` 凭据只能读取本实例的绑定，不能调用其他管理能力 |
-| 保存 RP 连接 | `PATCH /rp/connections/{id}` | `resource_update_rp_connection`；更新对应酒馆绑定，所选模型不覆盖共享目录；共享字段按渠道版本更新 |
-| 上报酒馆已保存连接 | `POST /rp/saves` | 酒馆保存适配器；本地版本、中心基线版本和来源事件标识 |
-| 取得／确认酒馆配置变更 | `GET /connector/jobs`、`POST /connector/receipts` | 配对酒馆实例及用户；租约任务，确认原生保存回读结果 |
-| 接收真实 RP 调用 | `POST /ingest/rp-calls` | 酒馆被动采集适配器 |
+| 领取／回执浏览器任务 | `GET /connector/jobs`、`POST /connector/receipts` | All API Hub 账号同步与 Chrome 书签执行端；租约任务，回报实际应用结果 |
 | 接收账号、签到及网关观察 | `POST /ingest/events` | 已登记来源适配器；按来源与事件标识去重 |
 
 MCP 提供管理动作，不提供任意 shell、任意 URL 请求或凭据导出工具。确需专用客户端配置时由绑定客户端获取；WebUI 和 Hub 能查看生成、下发、应用和验证的区别。
@@ -157,19 +154,18 @@ MCP 提供管理动作，不提供任意 shell、任意 URL 请求或凭据导�
 - 账号观察：来源账号 ID、站点与签到地址、余额单位和观察时间。
 - 签到：账号、业务日期、时区、执行方式、结果、原因及已确认奖励；未确认奖励为空。结果 `无需签到` 与余额门槛、站点暂不允许签到、无可用签到方式等原因表示当日无需签到，不计入失败或连续失败归档。
 - 调用／任务结果：任务与运行 ID、实际渠道模型、请求关联、终态、错误分类及耗时；任务质量结论与执行成功分开。不发送提示词或完整输出。
-- RP 保存：实例、原生连接 ID、中心连接 ID（首次可缺）、中心基线版本、本地保存版本、变更字段；敏感凭据经受限配置通道传递。
 
 HTTP 的参数错误、认证失败、权限不足、对象不存在、版本冲突分别使用 `400/401/403/404/409`；服务内部错误返回 `5xx`。错误体为 `code, message, details`，必要时附 `operationId`。版本冲突详情包含新版本和可安全展示的字段差异，凭据差异只表示“已更换”。
 
-当前实现：版本冲突统一返回 `code: version_conflict` 和 `details.currentVersion`（酒馆连接另附 `channelVersion`），尚未附字段差异；客户端据此重新读取后再修改。其他 409 是业务规则拒绝，沿用各自的 `code`（如 `scope_changed`、`cursor_expired`）和说明，不应当作版本冲突自动重读。参数错误的 `message` 逐项列出“字段路径：原因”。
+当前实现：版本冲突统一返回 `code: version_conflict` 和 `details.currentVersion`，尚未附字段差异；客户端据此重新读取后再修改。其他 409 是业务规则拒绝，沿用各自的 `code`（如 `scope_changed`、`cursor_expired`、`rp_out_of_center`）和说明，不应当作版本冲突自动重读。已退役的入口返回 `410`、`code: gone`。参数错误的 `message` 逐项列出“字段路径：原因”。
 
 某站点的 429、余额不足或模型失败属于扫描／验证结果，不冒充资源服务本身的 HTTP 故障。MCP 业务失败用 `isError` 和同一错误结构；正常返回“渠道验证未通过”的任务结果保留完整业务状态。[MCP 工具结果与错误处理](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)
 
 ## 分期接入和兼容
 
-第一阶段交付日常查询维护、来源事件、基础 MCP 和使用这些 API 的独立 WebUI，同时提供 RP／cron 的字段契约；未实现动作明确标记能力未就绪。第二阶段接入长任务和 cron 验证，并在 WebUI 展示配置及进度；第三阶段完成酒馆及专用客户端联调和冲突处理入口。接口随对应能力交付，不等 WebUI 全部完成后再补开放接口。
+第一阶段交付日常查询维护、来源事件、基础 MCP 和使用这些 API 的独立 WebUI，同时提供 cron 的字段契约；未实现动作明确标记能力未就绪。第二阶段接入长任务和 cron 验证，并在 WebUI 展示配置及进度；第三阶段完成专用客户端联调和冲突处理入口。接口随对应能力交付，不等 WebUI 全部完成后再补开放接口。
 
-旧版已在使用的 `/api/v1/ingest`、`/api/v1/rp/connections`、`/api/v1/rp/:id/config`、`/api/v1/rp/:id/saved`、`/api/v1/rp/calls` 按原请求、响应、权限和去重方式承接。切换前核对实际消费者；不能只保留相同 URL 却改变数据含义。
+旧版已在使用的 `/api/v1/ingest` 按原请求、响应、权限和去重方式承接。切换前核对实际消费者；不能只保留相同 URL 却改变数据含义。旧酒馆插件的 `/api/v1/rp/*` 已退役，统一返回 `410`，不再记录事件或调用。
 
 接口就绪后由服务提供方交付 OpenAPI 文件、MCP 工具清单、无密钥示例数据和联调地址。
 
@@ -186,4 +182,4 @@ HTTP 的参数错误、认证失败、权限不足、对象不存在、版本冲
 - `autoApply` 开启且实例允许写入时，任务通过后应用该模型，回读一致才更新恢复状态。临时验证模型使用随机别名；未通过的新验证连接在网关停用，不进入正常模型池。
 - 手动模型验证使用 `/evaluations`；网关冲突沿用 `/channels/:id/resolve`，可采用外部值或明确恢复中心规则。
 
-禁止测活、已移除、人工暂停与禁止使用都不参加主动检查；同一凭据的别名不能绕过禁测。酒馆不导入 New API，生图／视频不执行文字验证。客户端限定连接等待符合要求的真实客户端任务。
+禁止测活、已移除、人工暂停与禁止使用都不参加主动检查；同一凭据的别名不能绕过禁测。生图／视频不执行文字验证。客户端限定连接等待符合要求的真实客户端任务。

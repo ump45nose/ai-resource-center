@@ -5,189 +5,6 @@
     "version": "2.0.0"
   },
   "paths": {
-    "/api/v2/rp/connections": {
-      "get": {
-        "operationId": "resource_list_rp_connections",
-        "summary": "酒馆连接与同步状态",
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "session": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "channelId",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "$schema": "https://json-schema.org/draft/2020-12/schema",
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "酒馆连接与同步状态",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "参数错误"
-          },
-          "401": {
-            "description": "未登录"
-          },
-          "403": {
-            "description": "权限不足"
-          },
-          "409": {
-            "description": "版本或操作范围冲突"
-          }
-        }
-      }
-    },
-    "/api/v2/rp/connections/{id}": {
-      "patch": {
-        "operationId": "resource_update_rp_connection",
-        "summary": "修改酒馆连接，独立保存选定模型",
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "session": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "$schema": "https://json-schema.org/draft/2020-12/schema",
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
-                "type": "object",
-                "properties": {
-                  "version": {
-                    "type": "integer",
-                    "exclusiveMinimum": 0,
-                    "maximum": 9007199254740991
-                  },
-                  "channelVersion": {
-                    "type": "integer",
-                    "exclusiveMinimum": 0,
-                    "maximum": 9007199254740991
-                  },
-                  "binding": {
-                    "default": {},
-                    "type": "object",
-                    "properties": {
-                      "name": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "selectedModel": {
-                        "type": "string"
-                      },
-                      "enabled": {
-                        "type": "boolean"
-                      },
-                      "order": {
-                        "type": "integer",
-                        "minimum": 0,
-                        "maximum": 9007199254740991
-                      },
-                      "note": {
-                        "type": "string"
-                      }
-                    },
-                    "additionalProperties": false
-                  },
-                  "channel": {
-                    "default": {},
-                    "type": "object",
-                    "properties": {
-                      "baseUrl": {
-                        "type": "string",
-                        "format": "uri"
-                      },
-                      "protocol": {
-                        "type": "string",
-                        "enum": [
-                          "OpenAI",
-                          "OpenAI Responses",
-                          "Anthropic",
-                          "Gemini"
-                        ]
-                      }
-                    },
-                    "additionalProperties": false
-                  },
-                  "resolve": {
-                    "type": "string",
-                    "enum": [
-                      "center",
-                      "local",
-                      "merge"
-                    ]
-                  }
-                },
-                "required": [
-                  "version",
-                  "channelVersion"
-                ],
-                "additionalProperties": false
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "修改酒馆连接，独立保存选定模型",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "参数错误"
-          },
-          "401": {
-            "description": "未登录"
-          },
-          "403": {
-            "description": "权限不足"
-          },
-          "409": {
-            "description": "版本或操作范围冲突"
-          }
-        }
-      }
-    },
     "/api/v2/capabilities": {
       "get": {
         "operationId": "resource_capabilities",
@@ -534,7 +351,6 @@
               "enum": [
                 "general",
                 "media",
-                "rp",
                 "client"
               ]
             }
@@ -549,8 +365,7 @@
               "enum": [
                 "general",
                 "image",
-                "video",
-                "rp"
+                "video"
               ]
             }
           },
@@ -875,7 +690,6 @@
                                   "enum": [
                                     "general",
                                     "media",
-                                    "rp",
                                     "client"
                                   ]
                                 },
@@ -884,8 +698,7 @@
                                   "enum": [
                                     "general",
                                     "image",
-                                    "video",
-                                    "rp"
+                                    "video"
                                   ]
                                 },
                                 "archiveReasons": {
@@ -1105,7 +918,7 @@
     "/api/v2/bookmarks": {
       "get": {
         "operationId": "resource_bookmark_plan",
-        "summary": "按通用、生图、视频、酒馆及归档原因生成 Chrome 书签分类",
+        "summary": "按通用、生图、视频及归档原因生成 Chrome 书签分类；酒馆目录保持 RP 移出中心时的书签",
         "security": [
           {
             "bearerAuth": []
@@ -1117,7 +930,7 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": "按通用、生图、视频、酒馆及归档原因生成 Chrome 书签分类",
+            "description": "按通用、生图、视频及归档原因生成 Chrome 书签分类；酒馆目录保持 RP 移出中心时的书签",
             "content": {
               "application/json": {
                 "schema": {
@@ -1414,7 +1227,6 @@
                             "enum": [
                               "general",
                               "media",
-                              "rp",
                               "client"
                             ]
                           },
@@ -1423,8 +1235,7 @@
                             "enum": [
                               "general",
                               "image",
-                              "video",
-                              "rp"
+                              "video"
                             ]
                           },
                           "archiveReasons": {
@@ -1692,7 +1503,6 @@
               "enum": [
                 "general",
                 "media",
-                "rp",
                 "client"
               ]
             }
@@ -2338,7 +2148,6 @@
                         "enum": [
                           "general",
                           "media",
-                          "rp",
                           "client"
                         ]
                       },
@@ -2347,8 +2156,7 @@
                         "enum": [
                           "general",
                           "image",
-                          "video",
-                          "rp"
+                          "video"
                         ]
                       },
                       "tags": {
@@ -2786,7 +2594,6 @@
                         "enum": [
                           "general",
                           "media",
-                          "rp",
                           "client"
                         ]
                       },
@@ -2795,8 +2602,7 @@
                         "enum": [
                           "general",
                           "image",
-                          "video",
-                          "rp"
+                          "video"
                         ]
                       },
                       "tags": {
@@ -3338,7 +3144,6 @@
               "enum": [
                 "newapi",
                 "all-api-hub",
-                "sillytavern",
                 "notion",
                 "chrome-bookmarks"
               ]
@@ -3521,7 +3326,6 @@
               "enum": [
                 "newapi",
                 "all-api-hub",
-                "sillytavern",
                 "notion",
                 "chrome-bookmarks"
               ]
@@ -3591,7 +3395,6 @@
               "enum": [
                 "newapi",
                 "all-api-hub",
-                "sillytavern",
                 "notion",
                 "chrome-bookmarks"
               ]
@@ -3677,7 +3480,6 @@
               "enum": [
                 "newapi",
                 "all-api-hub",
-                "sillytavern",
                 "notion",
                 "chrome-bookmarks"
               ]
@@ -3958,7 +3760,6 @@
                     "enum": [
                       "general",
                       "media",
-                      "rp",
                       "client"
                     ]
                   }
@@ -4395,8 +4196,7 @@
                         "enum": [
                           "newapi",
                           "all-api-hub",
-                          "cron",
-                          "sillytavern"
+                          "cron"
                         ]
                       },
                       "url": {
@@ -4737,8 +4537,7 @@
                         "enum": [
                           "newapi",
                           "all-api-hub",
-                          "cron",
-                          "sillytavern"
+                          "cron"
                         ]
                       },
                       "url": {
@@ -6575,40 +6374,10 @@
         }
       }
     },
-    "/api/v2/rp/identity": {
-      "get": {
-        "operationId": "api_v2_rp_identity",
-        "summary": "核对配对的来源、实例与酒馆用户",
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "操作结果",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "未授权"
-          },
-          "403": {
-            "description": "来源不匹配"
-          }
-        }
-      }
-    },
     "/api/v2/access": {
       "post": {
         "operationId": "api_v2_access",
-        "summary": "管理员签发来源或实例与用户受限的接入凭据",
+        "summary": "管理员签发来源或目标受限的接入凭据",
         "requestBody": {
           "required": true,
           "content": {
@@ -6624,7 +6393,6 @@
                       "manage",
                       "ingest",
                       "cron",
-                      "rp",
                       "connector"
                     ]
                   },
@@ -6637,766 +6405,17 @@
                       "type": "string"
                     }
                   },
-                  "rpInstanceId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 160
-                  },
-                  "rpUserId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 160
-                  },
-                  "rpRegistration": {
-                    "type": "boolean"
-                  },
                   "target": {
                     "type": "string",
                     "enum": [
                       "all-api-hub",
-                      "chrome-bookmarks",
-                      "sillytavern"
+                      "chrome-bookmarks"
                     ]
                   }
                 },
                 "required": [
                   "role"
                 ]
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "操作结果",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "未授权"
-          },
-          "403": {
-            "description": "来源不匹配"
-          }
-        }
-      }
-    },
-    "/api/v2/rp/inventory": {
-      "post": {
-        "operationId": "api_v2_rp_inventory",
-        "summary": "登记配对实例与用户的已保存连接",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
-                "type": "object",
-                "properties": {
-                  "eventId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 160
-                  },
-                  "profiles": {
-                    "maxItems": 2000,
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "nativeConnectionId": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 160
-                        },
-                        "snapshot": {
-                          "anyOf": [
-                            {
-                              "type": "object",
-                              "properties": {
-                                "name": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 300
-                                },
-                                "baseUrl": {
-                                  "type": "string",
-                                  "format": "uri"
-                                },
-                                "protocol": {
-                                  "type": "string",
-                                  "enum": [
-                                    "OpenAI",
-                                    "OpenAI Responses",
-                                    "Anthropic",
-                                    "Gemini"
-                                  ]
-                                },
-                                "selectedModel": {
-                                  "default": "",
-                                  "type": "string",
-                                  "maxLength": 300
-                                },
-                                "order": {
-                                  "type": "integer",
-                                  "minimum": 0,
-                                  "maximum": 9007199254740991
-                                },
-                                "enabled": {
-                                  "default": true,
-                                  "type": "boolean"
-                                },
-                                "note": {
-                                  "default": "",
-                                  "type": "string",
-                                  "maxLength": 4000
-                                },
-                                "credentialFingerprint": {
-                                  "default": null,
-                                  "anyOf": [
-                                    {
-                                      "type": "string",
-                                      "pattern": "^[a-f0-9]{64}$"
-                                    },
-                                    {
-                                      "type": "null"
-                                    }
-                                  ]
-                                }
-                              },
-                              "required": [
-                                "name",
-                                "baseUrl",
-                                "protocol",
-                                "order"
-                              ],
-                              "additionalProperties": false
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "error": {
-                          "type": "string",
-                          "maxLength": 400
-                        }
-                      },
-                      "required": [
-                        "nativeConnectionId",
-                        "snapshot"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "removedIds": {
-                    "default": [],
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 160
-                    }
-                  }
-                },
-                "required": [
-                  "eventId",
-                  "profiles"
-                ],
-                "additionalProperties": false
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "操作结果",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "未授权"
-          },
-          "403": {
-            "description": "来源不匹配"
-          }
-        }
-      }
-    },
-    "/api/v2/rp/saves": {
-      "post": {
-        "operationId": "api_v2_rp_saves",
-        "summary": "上报原生保存及双方配置基线",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
-                "type": "object",
-                "properties": {
-                  "eventId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 160
-                  },
-                  "nativeConnectionId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 160
-                  },
-                  "localRevision": {
-                    "type": "integer",
-                    "exclusiveMinimum": 0,
-                    "maximum": 9007199254740991
-                  },
-                  "baseChannelVersion": {
-                    "type": "integer",
-                    "exclusiveMinimum": 0,
-                    "maximum": 9007199254740991
-                  },
-                  "baseBindingVersion": {
-                    "type": "integer",
-                    "exclusiveMinimum": 0,
-                    "maximum": 9007199254740991
-                  },
-                  "snapshot": {
-                    "type": "object",
-                    "properties": {
-                      "name": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 300
-                      },
-                      "baseUrl": {
-                        "type": "string",
-                        "format": "uri"
-                      },
-                      "protocol": {
-                        "type": "string",
-                        "enum": [
-                          "OpenAI",
-                          "OpenAI Responses",
-                          "Anthropic",
-                          "Gemini"
-                        ]
-                      },
-                      "selectedModel": {
-                        "default": "",
-                        "type": "string",
-                        "maxLength": 300
-                      },
-                      "order": {
-                        "type": "integer",
-                        "minimum": 0,
-                        "maximum": 9007199254740991
-                      },
-                      "enabled": {
-                        "default": true,
-                        "type": "boolean"
-                      },
-                      "note": {
-                        "default": "",
-                        "type": "string",
-                        "maxLength": 4000
-                      },
-                      "credentialFingerprint": {
-                        "default": null,
-                        "anyOf": [
-                          {
-                            "type": "string",
-                            "pattern": "^[a-f0-9]{64}$"
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      }
-                    },
-                    "required": [
-                      "name",
-                      "baseUrl",
-                      "protocol",
-                      "order"
-                    ],
-                    "additionalProperties": false
-                  }
-                },
-                "required": [
-                  "eventId",
-                  "nativeConnectionId",
-                  "localRevision",
-                  "baseChannelVersion",
-                  "baseBindingVersion",
-                  "snapshot"
-                ],
-                "additionalProperties": false
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "操作结果",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "未授权"
-          },
-          "403": {
-            "description": "来源不匹配"
-          }
-        }
-      }
-    },
-    "/api/v2/rp/credentials": {
-      "post": {
-        "operationId": "api_v2_rp_credentials",
-        "summary": "独立交付原生连接凭据",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
-                "type": "object",
-                "properties": {
-                  "eventId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 160
-                  },
-                  "nativeConnectionId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 160
-                  },
-                  "baseChannelVersion": {
-                    "type": "integer",
-                    "exclusiveMinimum": 0,
-                    "maximum": 9007199254740991
-                  },
-                  "baseBindingVersion": {
-                    "type": "integer",
-                    "exclusiveMinimum": 0,
-                    "maximum": 9007199254740991
-                  },
-                  "credential": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 32000
-                  }
-                },
-                "required": [
-                  "eventId",
-                  "nativeConnectionId",
-                  "baseChannelVersion",
-                  "baseBindingVersion",
-                  "credential"
-                ],
-                "additionalProperties": false
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "操作结果",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "未授权"
-          },
-          "403": {
-            "description": "来源不匹配"
-          }
-        }
-      }
-    },
-    "/api/v2/rp/archive": {
-      "post": {
-        "operationId": "api_v2_rp_archive",
-        "summary": "按不可用原因归档已授权连接",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
-                "type": "object",
-                "properties": {
-                  "nativeConnectionId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 160
-                  },
-                  "channelVersion": {
-                    "type": "integer",
-                    "exclusiveMinimum": 0,
-                    "maximum": 9007199254740991
-                  },
-                  "reason": {
-                    "type": "string",
-                    "enum": [
-                      "website",
-                      "balance",
-                      "invalid",
-                      "unstable",
-                      "call",
-                      "maintenance"
-                    ]
-                  },
-                  "note": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "nativeConnectionId",
-                  "channelVersion",
-                  "reason"
-                ],
-                "additionalProperties": false
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "操作结果",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "未授权"
-          },
-          "403": {
-            "description": "来源不匹配"
-          }
-        }
-      }
-    },
-    "/api/v2/rp/resolve": {
-      "post": {
-        "operationId": "api_v2_rp_resolve",
-        "summary": "处理已授权连接的配置冲突",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
-                "type": "object",
-                "properties": {
-                  "version": {
-                    "type": "integer",
-                    "exclusiveMinimum": 0,
-                    "maximum": 9007199254740991
-                  },
-                  "channelVersion": {
-                    "type": "integer",
-                    "exclusiveMinimum": 0,
-                    "maximum": 9007199254740991
-                  },
-                  "binding": {
-                    "default": {},
-                    "type": "object",
-                    "properties": {
-                      "name": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "selectedModel": {
-                        "type": "string"
-                      },
-                      "enabled": {
-                        "type": "boolean"
-                      },
-                      "order": {
-                        "type": "integer",
-                        "minimum": 0,
-                        "maximum": 9007199254740991
-                      },
-                      "note": {
-                        "type": "string"
-                      }
-                    },
-                    "additionalProperties": false
-                  },
-                  "channel": {
-                    "default": {},
-                    "type": "object",
-                    "properties": {
-                      "baseUrl": {
-                        "type": "string",
-                        "format": "uri"
-                      },
-                      "protocol": {
-                        "type": "string",
-                        "enum": [
-                          "OpenAI",
-                          "OpenAI Responses",
-                          "Anthropic",
-                          "Gemini"
-                        ]
-                      }
-                    },
-                    "additionalProperties": false
-                  },
-                  "resolve": {
-                    "type": "string",
-                    "enum": [
-                      "center",
-                      "local",
-                      "merge"
-                    ]
-                  },
-                  "nativeConnectionId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 160
-                  }
-                },
-                "required": [
-                  "version",
-                  "channelVersion",
-                  "nativeConnectionId"
-                ],
-                "additionalProperties": false
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "操作结果",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "未授权"
-          },
-          "403": {
-            "description": "来源不匹配"
-          }
-        }
-      }
-    },
-    "/api/v2/ingest/rp-calls": {
-      "post": {
-        "operationId": "api_v2_ingest_rp_calls",
-        "summary": "接收请求归属和真实调用终态",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
-                "type": "object",
-                "properties": {
-                  "events": {
-                    "minItems": 1,
-                    "maxItems": 100,
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "eventId": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 160
-                        },
-                        "profileId": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 160
-                        },
-                        "model": {
-                          "type": "string",
-                          "maxLength": 300
-                        },
-                        "baseUrl": {
-                          "type": "string",
-                          "format": "uri"
-                        },
-                        "protocol": {
-                          "type": "string",
-                          "enum": [
-                            "OpenAI",
-                            "OpenAI Responses",
-                            "Anthropic",
-                            "Gemini"
-                          ]
-                        },
-                        "credentialFingerprint": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "credentialVerified": {
-                          "type": "boolean"
-                        },
-                        "occurredAt": {
-                          "type": "string",
-                          "format": "date-time",
-                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
-                        },
-                        "origin": {
-                          "type": "string",
-                          "const": "live"
-                        },
-                        "result": {
-                          "type": "string",
-                          "enum": [
-                            "pending",
-                            "success",
-                            "failure",
-                            "cancelled",
-                            "unknown"
-                          ]
-                        },
-                        "latency": {
-                          "type": "number",
-                          "minimum": 0
-                        },
-                        "ttft": {
-                          "type": "number",
-                          "minimum": 0
-                        },
-                        "isStream": {
-                          "type": "boolean"
-                        },
-                        "inputTokens": {
-                          "type": "integer",
-                          "minimum": 0,
-                          "maximum": 9007199254740991
-                        },
-                        "outputTokens": {
-                          "type": "integer",
-                          "minimum": 0,
-                          "maximum": 9007199254740991
-                        },
-                        "tokenBasis": {
-                          "type": "string",
-                          "const": "provider"
-                        },
-                        "errorType": {
-                          "type": "string",
-                          "enum": [
-                            "rate",
-                            "quota",
-                            "key",
-                            "account",
-                            "input",
-                            "cancelled",
-                            "upstream"
-                          ]
-                        },
-                        "statusCode": {
-                          "type": "integer",
-                          "minimum": 100,
-                          "maximum": 599
-                        },
-                        "streamStatus": {
-                          "type": "string",
-                          "enum": [
-                            "completed",
-                            "disconnected",
-                            "failed",
-                            "cancelled",
-                            "unknown"
-                          ]
-                        }
-                      },
-                      "required": [
-                        "eventId",
-                        "model",
-                        "credentialFingerprint",
-                        "occurredAt",
-                        "origin",
-                        "result"
-                      ],
-                      "additionalProperties": false
-                    }
-                  }
-                },
-                "required": [
-                  "events"
-                ],
-                "additionalProperties": false
               }
             }
           }

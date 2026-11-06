@@ -49,7 +49,7 @@ export class Sources {
   }
   list() {
     return (this.store.setting("sources") || [])
-      .filter((s) => s.kind !== "cpa")
+      .filter((s) => !["cpa", "sillytavern"].includes(s.kind))
       .map((s) => ({
         ...publicValue(configurationVersion(s)),
         credentialStatus: s.credentialId ? "present" : "missing",
@@ -100,7 +100,7 @@ export class Sources {
     }
     if (source.syncEnabled && !old?.lastInventoryAt)
       throw new Problem(409, "请先预览并完成首次同步，再开启自动同步");
-    if (["newapi", "sillytavern"].includes(source.kind) && !source.url)
+    if (source.kind === "newapi" && !source.url)
       throw new Problem(400, "该来源需要服务地址");
     source.url ??= null;
     this.store.setting("sources", [

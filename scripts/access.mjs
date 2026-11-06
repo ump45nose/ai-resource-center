@@ -6,16 +6,13 @@ const [dir, role, output, sourceId, target, channelList] =
   process.argv.slice(2);
 if (
   !dir ||
-  !["read", "manage", "ingest", "cron", "rp", "connector"].includes(role) ||
+  !["read", "manage", "ingest", "cron", "connector"].includes(role) ||
   !output ||
-  (["ingest", "cron", "rp", "connector"].includes(role) && !sourceId) ||
-  (role === "connector" &&
-    !["all-api-hub", "chrome-bookmarks", "sillytavern"].includes(target)) ||
-  ((role === "rp" || (role === "connector" && target === "sillytavern")) &&
-    !channelList)
+  (["ingest", "cron", "connector"].includes(role) && !sourceId) ||
+  (role === "connector" && !["all-api-hub", "chrome-bookmarks"].includes(target))
 )
   throw new Error(
-    "用法：node scripts/access.mjs DATA_DIR read|manage|ingest|cron|rp|connector 私密文件路径 [sourceId] [target|-] [channelId,channelId]",
+    "用法：node scripts/access.mjs DATA_DIR read|manage|ingest|cron|connector 私密文件路径 [sourceId] [target|-] [channelId,channelId]",
   );
 const store = new Store(dir);
 try {
