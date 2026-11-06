@@ -3,6 +3,7 @@ export class ApiError extends Error {
     public status: number,
     message: string,
     public details?: unknown,
+    public code?: string,
   ) {
     super(message);
   }
@@ -18,16 +19,26 @@ export async function api<T>(
     headers: { "Content-Type": "application/json" },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
-  const data = await response.json();
+  const text = await response.text();
+  let data: any;
+  try {
+    data = text ? JSON.parse(text) : undefined;
+  } catch {
+    data = undefined;
+  }
   if (!response.ok) {
     if (response.status === 401)
       window.dispatchEvent(new Event("session-expired"));
     throw new ApiError(
       response.status,
-      data.message || `请求未完成（${response.status}）`,
-      data.details,
+      (typeof data?.message === "string" && data.message) ||
+        `请求未完成（${response.status}）`,
+      data?.details,
+      typeof data?.code === "string" ? data.code : undefined,
     );
   }
+  if (text && data === undefined)
+    throw new ApiError(response.status, `响应无法识别（${response.status}）`);
   return data;
 }
 export async function allPages<T>(path: string): Promise<T[]> {
@@ -41,6 +52,28 @@ export async function allPages<T>(path: string): Promise<T[]> {
     cursor = page.nextCursor;
   } while (cursor !== null);
   return rows;
+}
+
+export const errorText = (e: unknown, fallback = "操作未完成") =>
+  e instanceof Error ? e.message : fallback;
+
+// Other 409s are business rules whose message must stay visible.
+export const isVersionConflict = (e: unknown) =>
+  e instanceof ApiError &&
+  e.status === 409 &&
+  (e.code === "version_conflict" ||
+    (typeof e.details === "object" &&
+      e.details !== null &&
+      "currentVersion" in e.details));
+export const conflictText = "资料已在其他入口更新，已读取最新版本，请重新修改";
+export async function saveError(e: unknown, reload: () => Promise<unknown>) {
+  if (!isVersionConflict(e)) return errorText(e);
+  try {
+    await reload();
+  } catch (reloadError) {
+    return errorText(reloadError);
+  }
+  return conflictText;
 }
 
 export async function copyText(text: string) {

@@ -1,98 +1,27 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowRight, FileSearch, Play, Radar, Settings2 } from "lucide-react";
 import {
   Badge,
   Button,
   EmptyState,
   FilterSearch,
-  Overlay,
   SectionHeading,
   Segmented,
 } from "../components";
-import { api, allPages } from "../api";
+import { api, errorText, saveError } from "../api";
+import { usePolling } from "../hooks";
 import {
   dateTime,
   archiveLabels,
   tagLabels,
   websiteLabel,
   catalogLabel,
-  type Channel,
-  type Operation,
+  type MaintenanceSummary,
 } from "../data";
 import { useWorkspace } from "../workspace";
+import MaintenanceSettings from "../MaintenanceSettings";
+import ModelTests from "../ModelTests";
 
-type Policy = {
-  enabled: boolean;
-  autoApply: boolean;
-  smokeEnabled: boolean;
-  smokeMaxTokens: number;
-  normalHours: number;
-  maintenanceHours: number;
-  closedHours: number;
-  keyRetryHours: number;
-  newModelsHours: number;
-  archiveAfterDays: number;
-  archiveReviewHours: number;
-  maxCandidates: number;
-  maxEvaluationsPerDay: number;
-  modelRules: { match: string; capabilityClass: "strong" | "execution" }[];
-  excludedModels: string;
-};
-type State = {
-  channelId: string;
-  waitingFor: string | null;
-  validationBlocked: string | null;
-  nextCheckAt: string | null;
-  automaticReason?: string | null;
-};
-type Summary = {
-  policy: Policy;
-  budget: { used: number; limit: number };
-  gatewayWrites: boolean;
-  tasks: { total: number; ready: number };
-  channels: State[];
-  coverage?: Record<
-    string,
-    {
-      channelId: string;
-      state: string;
-      nextCheckAt: string | null;
-      waitingFor: string | null;
-    }[]
-  >;
-  pilot?: {
-    state: string;
-    channelId: string;
-    modelId: string;
-    appliedAt?: string;
-  };
-  bindings?: {
-    id: string;
-    version: number;
-    taskName: string;
-    channelId: string;
-    modelId: string;
-    enabled: boolean;
-    validationOnly?: boolean;
-  }[];
-  runs?: {
-    id: string;
-    channelId: string;
-    modelId: string;
-    executionMode?: string;
-    createdAt: string;
-    completedAt?: string;
-    verification?: {
-      result: string;
-      quality: string;
-      reason?: string;
-      artifactRef?: string;
-    };
-  }[];
-  operations: Operation[];
-};
-const errorText = (e: unknown) =>
-  e instanceof Error ? e.message : "操作未完成";
 const stateLabel = (state?: string) =>
   ({
     queued: "排队中",
@@ -108,7 +37,7 @@ export default function Scans() {
   const [filter, setFilter] = useState("待恢复"),
     [search, setSearch] = useState("");
   const [selected, setSelected] = useState<string[]>([]),
-    [summary, setSummary] = useState<Summary | null>(null);
+    [summary, setSummary] = useState<MaintenanceSummary | null>(null);
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const [settings, setSettings] = useState(false),
@@ -133,17 +62,21 @@ export default function Scans() {
     .filter(({ channel: c }) => c.probeAllowed)
     .map(({ channel: c }) => c.id);
   const target = entries.find(({ channel: c }) => c.id === modelChannel);
+  const loads = useRef(0);
+  useEffect(() => () => void loads.current++, []);
   async function load() {
-    setSummary(await api<Summary>("/maintenance"));
+    const id = ++loads.current;
+    try {
+      const next = await api<MaintenanceSummary>("/maintenance");
+      if (id === loads.current) setSummary(next);
+    } catch (e) {
+      if (id === loads.current) throw e;
+    }
   }
-  useEffect(() => {
+  usePolling((first) => {
     void load().catch((e) => setError(errorText(e)));
-    const timer = setInterval(() => {
-      void load().catch((e) => setError(errorText(e)));
-      void refresh();
-    }, 10000);
-    return () => clearInterval(timer);
-  }, [refresh]);
+    if (!first) void refresh();
+  }, refresh);
   async function run(kind: "scan" | "maintain", ids: string[]) {
     setBusy(true);
     setError("");
@@ -408,6 +341,7 @@ export default function Scans() {
                       </small>
                       <Button
                         variant="ghost"
+                        aria-label={`模型与结果：${c.name}`}
                         onClick={() => setModelChannel(c.id)}
                       >
                         模型与结果
@@ -466,6 +400,7 @@ export default function Scans() {
                 </span>
                 <Button
                   disabled={busy}
+                  aria-label={`${b.enabled ? "停用绑定" : "启用绑定"}：${b.taskName}`}
                   onClick={() => {
                     setBusy(true);
                     void api(`/cron/bindings/${b.id}`, "PATCH", {
@@ -473,7 +408,7 @@ export default function Scans() {
                       changes: { enabled: !b.enabled },
                     })
                       .then(load)
-                      .catch((e) => setError(errorText(e)))
+                      .catch(async (e) => setError(await saveError(e, load)))
                       .finally(() => setBusy(false));
                   }}
                 >
@@ -589,447 +524,5 @@ export default function Scans() {
         />
       )}
     </>
-  );
-}
-
-function MaintenanceSettings({
-  summary,
-  close,
-  saved,
-}: {
-  summary: Summary;
-  close: () => void;
-  saved: () => Promise<void>;
-}) {
-  const [p, setP] = useState(summary.policy),
-    [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
-  const [tasks, setTasks] = useState<
-    {
-      id: string;
-      name: string;
-      enabled: boolean;
-      supportsRunConfig: boolean;
-      supportsResult: boolean;
-    }[]
-  >([]);
-  useEffect(() => {
-    void allPages<(typeof tasks)[number]>("/cron/tasks")
-      .then(setTasks)
-      .catch((e) => setError(errorText(e)));
-  }, []);
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError("");
-    try {
-      await api("/policies", "PATCH", {
-        changes: p,
-      });
-      await saved();
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <Overlay
-      title="自动维护"
-      subtitle="扫描 → 任务验收 → New API 回读"
-      onClose={close}
-    >
-      <form className="overlay-body form-stack" onSubmit={submit}>
-        <label className="check-line">
-          <input
-            type="checkbox"
-            checked={p.enabled}
-            onChange={(e) => setP({ ...p, enabled: e.target.checked })}
-          />
-          按周期检查渠道
-        </label>
-        <label className="check-line">
-          <input
-            type="checkbox"
-            checked={p.autoApply}
-            onChange={(e) => setP({ ...p, autoApply: e.target.checked })}
-          />
-          任务通过后自动恢复到 New API
-        </label>
-        <label className="check-line">
-          <input
-            type="checkbox"
-            checked={p.smokeEnabled}
-            onChange={(e) => setP({ ...p, smokeEnabled: e.target.checked })}
-          />
-          无可用 cron 时使用小任务验证
-        </label>
-        <p className="muted">
-          小任务检查代码或计算结果，有明确验收；优先使用已绑定、已适配的真实
-          cron。生图与视频等待 image-caption。
-        </p>
-        <div className="form-columns">
-          {(
-            [
-              ["normalHours", "正常渠道 / 小时"],
-              ["maintenanceHours", "维护渠道 / 小时"],
-              ["closedHours", "关闭网站 / 小时"],
-              ["keyRetryHours", "key 复查 / 小时"],
-              ["archiveAfterDays", "持续故障归档 / 天"],
-              ["archiveReviewHours", "归档后复查 / 小时"],
-              ["newModelsHours", "模型复验 / 小时"],
-              ["maxCandidates", "每渠道每轮候选"],
-              ["maxEvaluationsPerDay", "每日任务次数上限"],
-              ["smokeMaxTokens", "小任务输出 Token 上限"],
-            ] as const
-          ).map(([key, label]) => (
-            <label key={key}>
-              {label}
-              <input
-                type="number"
-                min={key === "smokeMaxTokens" ? 256 : key === "archiveReviewHours" ? 24 : 1}
-                max={
-                  key === "maxCandidates"
-                    ? 20
-                    : key === "archiveAfterDays" ? 365
-                    : key === "archiveReviewHours" ? 8760
-                    : key === "smokeMaxTokens"
-                      ? 4096
-                      : undefined
-                }
-                value={p[key]}
-                onChange={(e) => setP({ ...p, [key]: Number(e.target.value) })}
-                required
-              />
-            </label>
-          ))}
-        </div>
-        <h3>认可模型范围</h3>
-        <p className="muted">
-          按名称包含匹配，逗号分隔；从上到下优先。目录中的其他型号仍可查看，不自动消耗额度验证。
-        </p>
-        {p.modelRules.map((r, i) => (
-          <label key={i}>
-            {r.capabilityClass === "strong" ? "强模型候选" : "执行模型候选"}
-            <input
-              value={r.match}
-              onChange={(e) =>
-                setP({
-                  ...p,
-                  modelRules: p.modelRules.map((old, n) =>
-                    n === i ? { ...old, match: e.target.value } : old,
-                  ),
-                })
-              }
-              required
-            />
-          </label>
-        ))}
-        <label>
-          排除名称
-          <input
-            value={p.excludedModels}
-            onChange={(e) => setP({ ...p, excludedModels: e.target.value })}
-          />
-        </label>
-        <details>
-          <summary>fn 任务目录 · {summary.tasks.ready} 项已适配</summary>
-          <div className="task-catalog">
-            {tasks.map((t) => (
-              <div key={t.id}>
-                <span>{t.name}</span>
-                <Badge>
-                  {!t.enabled
-                    ? "原任务暂停"
-                    : t.supportsRunConfig && t.supportsResult
-                      ? "可绑定"
-                      : "待适配"}
-                </Badge>
-              </div>
-            ))}
-          </div>
-        </details>
-        {error && (
-          <p className="inline-error" role="alert">
-            {error}
-          </p>
-        )}
-        <div className="overlay-actions">
-          <Button onClick={close}>取消</Button>
-          <Button type="submit" variant="primary" disabled={busy}>
-            {busy ? "保存中…" : "保存策略"}
-          </Button>
-        </div>
-      </form>
-    </Overlay>
-  );
-}
-
-function ModelTests({
-  channel: c,
-  status,
-  close,
-  updated,
-}: {
-  channel: Channel;
-  status?: State;
-  close: () => void;
-  updated: () => Promise<void>;
-}) {
-  const [search, setSearch] = useState(""),
-    [busy, setBusy] = useState(""),
-    [error, setError] = useState("");
-  type Task = {
-    id: string;
-    externalId: string;
-    source: string;
-    name: string;
-    enabled: boolean;
-    supportsRunConfig: boolean;
-    supportsResult: boolean;
-    supportsScheduledRunConfig?: boolean;
-  };
-  const [tasks, setTasks] = useState<Task[]>([]),
-    [taskId, setTaskId] = useState(""),
-    [validationOnly, setValidationOnly] = useState(true);
-  useEffect(() => {
-    void allPages<Task>("/cron/tasks")
-      .then(setTasks)
-      .catch((e) => setError(errorText(e)));
-  }, []);
-  const rows = [...c.modelAvailability]
-    .filter((o) => o.modelId.toLowerCase().includes(search.toLowerCase()))
-    .sort(
-      (a, b) =>
-        Number(!!b.verification) - Number(!!a.verification) ||
-        Number(b.proposedClass !== "unclassified") -
-          Number(a.proposedClass !== "unclassified") ||
-        (b.stationMetrics?.successRate ?? -1) -
-          (a.stationMetrics?.successRate ?? -1),
-    );
-  async function act(
-    modelId: string,
-    action: "evaluate" | "apply" | "external" | "center",
-  ) {
-    setBusy(modelId);
-    setError("");
-    try {
-      const path =
-        action === "evaluate"
-          ? "/evaluations"
-          : `/channels/${c.id}/${action === "apply" ? "apply" : "resolve"}`;
-      const task = tasks.find((t) => t.id === taskId);
-      let binding: { id: string } | undefined;
-      if (action === "evaluate" && task)
-        binding = await api<{ id: string }>("/cron/bindings", "POST", {
-          data: {
-            taskRef: { source: task.source, id: task.externalId },
-            channelId: c.id,
-            modelId,
-            enabled: true,
-            discoverNewModels: true,
-            validationOnly,
-          },
-        });
-      await api(path, "POST", {
-        requestId: crypto.randomUUID(),
-        modelId,
-        ...(action === "evaluate"
-          ? {
-              channelId: c.id,
-              ...(task
-                ? {
-                    taskRef: { source: task.source, id: task.externalId },
-                    bindingId: binding?.id,
-                    executionMode: validationOnly ? "preview" : "scheduled",
-                  }
-                : {}),
-            }
-          : {}),
-        ...(["external", "center"].includes(action) ? { choice: action } : {}),
-      });
-      await updated();
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setBusy("");
-    }
-  }
-  return (
-    <Overlay
-      title={c.name}
-      subtitle="目录可见、站方表现和任务结果分开看"
-      drawer
-      onClose={close}
-    >
-      <div className="overlay-body form-stack">
-        {status?.validationBlocked && (
-          <p className="quiet-notice">{status.validationBlocked}</p>
-        )}
-        {error && (
-          <p className="inline-error" role="alert">
-            {error}
-          </p>
-        )}
-        <label>
-          验证任务
-          <select value={taskId} onChange={(e) => setTaskId(e.target.value)}>
-            <option value="">使用已绑定 cron，否则用小任务</option>
-            {tasks
-              .filter(
-                (t) => t.enabled && t.supportsRunConfig && t.supportsResult,
-              )
-              .map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-          </select>
-        </label>
-        {taskId && (
-          <label className="toggle-field">
-            <input
-              type="checkbox"
-              checked={validationOnly}
-              onChange={(e) => setValidationOnly(e.target.checked)}
-            />
-            仅用于验证预览，不改正式任务配置和投递
-          </label>
-        )}
-        {!tasks.some(
-          (t) => t.enabled && t.supportsRunConfig && t.supportsResult,
-        ) && (
-          <p className="muted">
-            cron 目录已接入，执行入口尚待适配。原计划与暂停状态不变。
-          </p>
-        )}
-        <FilterSearch
-          value={search}
-          onChange={setSearch}
-          placeholder="搜索模型"
-        />
-        <div className="model-tests">
-          {rows.slice(0, 60).map((o) => (
-            <article key={o.modelId}>
-              <strong className="mono">{o.modelId}</strong>
-              <div className="inline-tags">
-                <Badge>
-                  {o.catalog?.present ? "key 目录可见" : "历史或已选模型"}
-                </Badge>
-                {o.proposedClass && o.proposedClass !== "unclassified" && (
-                  <Badge>
-                    {o.proposedClass === "strong"
-                      ? "强模型候选"
-                      : "执行模型候选"}
-                  </Badge>
-                )}
-                <Badge
-                  tone={
-                    o.verification?.result === "success" ? "green" : "neutral"
-                  }
-                >
-                  {o.verification?.result === "success"
-                    ? "任务通过"
-                    : o.verification
-                      ? "未通过验证"
-                      : "未验证"}
-                </Badge>
-              </div>
-              <p>
-                站方成功率{" "}
-                {o.stationMetrics?.successRate != null
-                  ? `${o.stationMetrics.successRate}%`
-                  : "未提供"}{" "}
-                · {o.stationMetrics?.samples ?? "—"} 条站方样本
-              </p>
-              {o.health?.blocked && (
-                <p className="inline-error">
-                  已隔离：{o.health.reason || "等待任务复验"}
-                </p>
-              )}
-              {o.verification && (
-                <p>
-                  {o.verification.reason || o.verification.result} ·{" "}
-                  {dateTime(o.verification.at)}
-                </p>
-              )}
-              {o.grade && (
-                <p>
-                  真实调用：{o.grade.samples} 条 · 成功率{" "}
-                  {o.grade.successRate == null
-                    ? "未采集"
-                    : `${o.grade.successRate.toFixed(1)}%`}{" "}
-                  ·
-                  {{
-                    observing: "样本不足，保留原优先级",
-                    preferred: "优先候选",
-                    regular: "常规候选",
-                    backup: "备用候选",
-                  }[o.grade.tier] || o.grade.tier}
-                  {o.grade.entitlement?.daily ? " · 优先消耗当日额度" : ""} ·
-                  权重 {o.grade.weight ?? 100}
-                  {o.grade.reason && <small>{o.grade.reason}</small>}
-                </p>
-              )}
-              {o.apply && (
-                <p>
-                  New API：
-                  {{
-                    synced: "已回读确认",
-                    staged: "仅验证连接",
-                    conflict: "存在外部修改",
-                    external: "采用外部配置",
-                    pending_sync: "已保存，等待分发回读",
-                    distributed: "中心托管配置已分发",
-                  }[o.apply.state] || o.apply.state}
-                  {o.grade
-                    ? ` · ${o.grade.samples} 条真实样本 · 优先级 ${o.grade.priority}`
-                    : ""}
-                </p>
-              )}
-              {o.apply?.state === "conflict" ? (
-                <div className="scan-actions">
-                  <Button
-                    disabled={!!busy}
-                    onClick={() => void act(o.modelId, "external")}
-                  >
-                    采用外部配置
-                  </Button>
-                  <Button
-                    disabled={!!busy}
-                    onClick={() => void act(o.modelId, "center")}
-                  >
-                    恢复中心规则
-                  </Button>
-                </div>
-              ) : (
-                <div className="scan-actions">
-                  <Button
-                    disabled={
-                      !!busy || (!!status?.validationBlocked && !taskId)
-                    }
-                    onClick={() => void act(o.modelId, "evaluate")}
-                  >
-                    验证此模型
-                  </Button>
-                  {o.verification?.result === "success" && (
-                    <Button
-                      disabled={!!busy}
-                      onClick={() => void act(o.modelId, "apply")}
-                    >
-                      同步 New API
-                    </Button>
-                  )}
-                </div>
-              )}
-            </article>
-          ))}
-        </div>
-        {!rows.length && <p className="muted">尚无模型目录，先扫描渠道。</p>}
-        {rows.length > 60 && (
-          <p className="muted">显示前 60 个，可搜索具体模型。</p>
-        )}
-      </div>
-    </Overlay>
   );
 }

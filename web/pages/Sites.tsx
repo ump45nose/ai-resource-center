@@ -34,7 +34,7 @@ import {
   type Site,
 } from "../data";
 import { useWorkspace } from "../workspace";
-import { api, copyText } from "../api";
+import { api, copyText, errorText } from "../api";
 
 function KeyCell({ site, onEdit }: { site: Site; onEdit: () => void }) {
   const { notify } = useWorkspace();
@@ -50,7 +50,7 @@ function KeyCell({ site, onEdit }: { site: Site; onEdit: () => void }) {
       await copyText(key);
       notify("调用 key 已复制");
     } catch (error) {
-      notify(error instanceof Error ? error.message : "复制未完成");
+      notify(errorText(error, "复制未完成"));
     } finally {
       setCopying(null);
     }
@@ -68,20 +68,30 @@ function KeyCell({ site, onEdit }: { site: Site; onEdit: () => void }) {
                 className="copy-key"
                 onClick={() => copy(channel.id)}
                 disabled={copying !== null}
+                aria-label={`复制 key：${channel.name}`}
+                aria-busy={copying === channel.id}
                 title={`复制 ${channel.name} 当前选用的调用 key`}
               >
                 <Copy size={13} />
                 {copying === channel.id ? "复制中…" : "复制 key"}
               </button>
             ) : (
-              <button className="hub-entry-button" onClick={onEdit}>
+              <button
+                className="hub-entry-button"
+                aria-label={`补 key：${channel.name}`}
+                onClick={onEdit}
+              >
                 补 key
               </button>
             )}
           </div>
         ))
       ) : (
-        <button className="hub-entry-button" onClick={onEdit}>
+        <button
+          className="hub-entry-button"
+          aria-label={`配置渠道：${site.name}`}
+          onClick={onEdit}
+        >
           配置渠道
         </button>
       )}
@@ -175,7 +185,11 @@ function HubCheckinCell({
                 </a>
               )}
             {!status.checkedIn && !url && (
-              <button className="hub-entry-button" onClick={onEdit}>
+              <button
+                className="hub-entry-button"
+                aria-label={`设置签到入口：${account.name}`}
+                onClick={onEdit}
+              >
                 设置签到入口
               </button>
             )}
@@ -288,9 +302,12 @@ export default function Sites() {
       URL.revokeObjectURL(url);
       notify("书签已导出，分类与当前资源一致");
     } catch (e) {
-      notify(e instanceof Error ? e.message : "导出失败");
+      notify(errorText(e, "导出失败"));
     }
   }
+  const gatewayCount = sites
+    .flatMap((s) => s.channels)
+    .filter((c) => c.usage !== "rp" && c.runtimeEnabled === true).length;
   return (
     <>
       <div className="summary-grid">
@@ -304,23 +321,23 @@ export default function Sites() {
             <small> 个站点</small>
           </strong>
         </div>
-        <button className="summary-item" onClick={() => navigate("sources")}>
+        <button
+          className="summary-item"
+          aria-label={`网关已启用 ${gatewayCount} 条连接，查看接入与同步`}
+          onClick={() => navigate("sources")}
+        >
           <span>
             网关已启用
             <ArrowUpRight size={16} />
           </span>
           <strong>
-            {
-              sites
-                .flatMap((s) => s.channels)
-                .filter((c) => c.usage !== "rp" && c.runtimeEnabled === true)
-                .length
-            }
+            {gatewayCount}
             <small> 条连接</small>
           </strong>
         </button>
         <button
           className={`summary-item ${archived ? "selected" : ""}`}
+          aria-label={`归档 ${archiveCount} 个站点，查看归档站点`}
           onClick={goArchive}
         >
           <span>

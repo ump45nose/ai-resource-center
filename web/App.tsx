@@ -1,11 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type FormEvent,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight,
   ArrowUpRight,
@@ -27,11 +20,9 @@ import {
   X,
 } from "lucide-react";
 import { Badge, Button, Overlay } from "./components";
-import { api, allPages, ApiError } from "./api";
+import { api, allPages, ApiError, errorText } from "./api";
 import {
-  activeModels,
   balances,
-  dateTime,
   pageLabels,
   type Meta,
   type Model,
@@ -41,11 +32,12 @@ import {
   type Source,
 } from "./data";
 import { WorkspaceProvider } from "./workspace";
+import Login from "./Login";
 import Sites from "./pages/Sites";
 import ManagementPanel from "./ManagementPanel";
 import Models from "./pages/Models";
 import Sources from "./pages/Sources";
-import HubSourcePanel from "./HubSourcePanel";
+import SourcePanel from "./SourcePanel";
 import Scans from "./pages/Scans";
 import Benefits from "./pages/Benefits";
 
@@ -64,7 +56,6 @@ const currentPage = (): Page =>
   Object.hasOwn(pageLabels, window.location.hash.slice(1))
     ? (window.location.hash.slice(1) as Page)
     : "sites";
-const message = (e: unknown) => (e instanceof Error ? e.message : "操作未完成");
 
 export default function App() {
   const [session, setSession] = useState<"loading" | "login" | "ready">(
@@ -99,7 +90,7 @@ export default function App() {
       setLoadError("");
     } catch (e) {
       if (!(e instanceof ApiError && e.status === 401))
-        setLoadError(message(e));
+        setLoadError(errorText(e));
     } finally {
       setLoading(false);
     }
@@ -110,7 +101,7 @@ export default function App() {
       .catch((e) => {
         setSession("login");
         if (!(e instanceof ApiError && e.status === 401))
-          setLoadError(message(e));
+          setLoadError(errorText(e));
       });
     const expired = () => {
       setSession("login");
@@ -159,7 +150,7 @@ export default function App() {
     const grouped = new Map<string, Model>();
     for (const site of sites)
       for (const channel of site.channels)
-        for (const id of activeModels(channel)) {
+        for (const id of channel.activeModels) {
           const offering = channel.modelAvailability.find(
             (o) => o.modelId === id,
           );
@@ -433,7 +424,9 @@ export default function App() {
       )}
       {panel?.kind === "source" && (
         <SourcePanel
-          source={panel.source}
+          source={
+            sources.find((s) => s.id === panel.source?.id) ?? panel.source
+          }
           close={() => setPanel(null)}
           saved={async () => {
             await refresh();
@@ -503,234 +496,5 @@ export default function App() {
         </div>
       )}
     </WorkspaceProvider>
-  );
-}
-
-function Login({
-  loading,
-  initialError,
-  loggedIn,
-}: {
-  loading: boolean;
-  initialError: string;
-  loggedIn: () => void;
-}) {
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError("");
-    try {
-      await api("/session", "POST", { password });
-      setPassword("");
-      loggedIn();
-    } catch (e) {
-      setError(message(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <main className="login-shell">
-      <form className="login-card form-stack" onSubmit={submit}>
-        <Sparkles size={30} strokeWidth={1.2} />
-        <h1>AI Resource Hub</h1>
-        <p className="muted">查看和管理手上的公益 AI 资源。</p>
-        {loading ? (
-          <p>正在连接…</p>
-        ) : (
-          <>
-            <label>
-              管理密码
-              <input
-                type="password"
-                autoComplete="current-password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-            </label>
-            {(error || initialError) && (
-              <p className="inline-error" role="alert">
-                {error || initialError}
-              </p>
-            )}
-            <Button type="submit" variant="primary" disabled={busy}>
-              {busy ? "登录中…" : "进入工作台"}
-              <ArrowRight size={15} />
-            </Button>
-          </>
-        )}
-      </form>
-    </main>
-  );
-}
-
-function SourcePanel({
-  source,
-  close,
-  saved,
-}: {
-  source?: Source;
-  close: () => void;
-  saved: () => Promise<void>;
-}) {
-  const [name, setName] = useState(source?.name || "New API");
-  const [url, setUrl] = useState(source?.url || "");
-  const [userId, setUserId] = useState(String(source?.userId || 1));
-  const [key, setKey] = useState("");
-  const [minutes, setMinutes] = useState(source?.inventoryMinutes || 10);
-  const [calls, setCalls] = useState(source?.callsMinutes || 1);
-  const [auto, setAuto] = useState(source?.syncEnabled || false);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  if (source?.kind === "all-api-hub")
-    return <HubSourcePanel source={source} close={close} />;
-  if (source && source.kind !== "newapi")
-    return (
-      <Overlay title={source.name} onClose={close}>
-        <div className="overlay-body">
-          <p>现有资料与上报历史已保留。此来源的新版持续接入在下一批完成。</p>
-          <dl className="detail-status">
-            <div>
-              <dt>最近收到</dt>
-              <dd>{dateTime(source.receivedAt || source.last)}</dd>
-            </div>
-          </dl>
-        </div>
-      </Overlay>
-    );
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError("");
-    try {
-      const data = {
-        name: name.trim(),
-        kind: "newapi",
-        url: url.trim(),
-        userId: Number(userId),
-        syncEnabled: auto,
-        inventoryMinutes: minutes,
-        callsMinutes: calls,
-      };
-      let s = source
-        ? await api<Source>(`/sources/${source.id}`, "PATCH", {
-            version: source.version,
-            changes: data,
-          })
-        : await api<Source>("/sources", "POST", { data });
-      if (key)
-        s = await api<Source>(`/sources/${s.id}/credential`, "PUT", {
-          version: s.version,
-          key,
-        });
-      setKey("");
-      await saved();
-    } catch (e) {
-      setError(message(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <Overlay
-      title={source ? "New API 接入设置" : "接入 New API"}
-      onClose={close}
-    >
-      <form className="overlay-body form-stack" onSubmit={submit}>
-        <label>
-          显示名称
-          <input
-            required
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-        </label>
-        <label>
-          服务地址
-          <input
-            type="url"
-            required
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="http://192.168.31.201:3000"
-          />
-        </label>
-        <label>
-          管理用户 ID
-          <input
-            type="number"
-            min="1"
-            required
-            value={userId}
-            onChange={(e) => setUserId(e.target.value)}
-          />
-        </label>
-        <label>
-          管理访问凭据
-          <input
-            type="password"
-            autoComplete="off"
-            required={!source}
-            value={key}
-            onChange={(e) => setKey(e.target.value)}
-            placeholder={
-              source?.credentialStatus === "present"
-                ? "已保存，留空保持不变"
-                : "填写管理访问凭据"
-            }
-          />
-          <small>仅保存在 fn；更换服务地址时需重新填写。</small>
-        </label>
-        <div className="form-columns">
-          <label>
-            配置同步间隔（分钟）
-            <input
-              type="number"
-              min="1"
-              max="1440"
-              required
-              value={minutes}
-              onChange={(e) => setMinutes(Number(e.target.value))}
-            />
-          </label>
-          <label>
-            调用同步间隔（分钟）
-            <input
-              type="number"
-              min="1"
-              max="1440"
-              required
-              value={calls}
-              onChange={(e) => setCalls(Number(e.target.value))}
-            />
-          </label>
-        </div>
-        <label className="checkbox-label">
-          <input
-            type="checkbox"
-            disabled={!source?.lastInventoryAt}
-            checked={auto}
-            onChange={(e) => setAuto(e.target.checked)}
-          />
-          自动同步渠道配置和调用记录
-        </label>
-        <p className="form-hint">来源同步不会开启模型测试或修改网关。</p>
-        {error && (
-          <p className="inline-error" role="alert">
-            {error}
-          </p>
-        )}
-        <div className="form-actions">
-          <Button onClick={close}>取消</Button>
-          <Button type="submit" variant="primary" disabled={busy}>
-            {busy ? "保存中…" : "保存接入设置"}
-          </Button>
-        </div>
-      </form>
-    </Overlay>
   );
 }

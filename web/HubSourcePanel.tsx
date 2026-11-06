@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button, Overlay } from "./components";
-import { api } from "./api";
+import { api, errorText } from "./api";
 import { dateTime, type Source } from "./data";
 
 export default function HubSourcePanel({
@@ -26,7 +26,7 @@ export default function HubSourcePanel({
         ).token,
       );
     } catch (e) {
-      setError((e as Error).message);
+      setError(errorText(e));
     } finally {
       setBusy(false);
     }

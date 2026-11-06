@@ -7,6 +7,7 @@ import {
   FilterSearch,
   Segmented,
 } from "../components";
+import { copyText } from "../api";
 import { tagLabels } from "../data";
 import { useWorkspace } from "../workspace";
 export default function Models() {
@@ -88,15 +89,20 @@ export default function Models() {
               )}
             </div>
             <div className="model-card-footer">
-              <Button variant="ghost" onClick={() => inspectModel(m.id)}>
+              <Button
+                variant="ghost"
+                aria-label={`查看渠道：${m.id}`}
+                onClick={() => inspectModel(m.id)}
+              >
                 查看渠道
                 <ArrowRight size={14} />
               </Button>
               <Button
                 variant="ghost"
+                aria-label={`复制 ID：${m.id}`}
                 onClick={async () => {
                   try {
-                    await navigator.clipboard.writeText(m.id);
+                    await copyText(m.id);
                     notify("模型 ID 已复制");
                   } catch {
                     notify("请在详情中选择并复制模型 ID");

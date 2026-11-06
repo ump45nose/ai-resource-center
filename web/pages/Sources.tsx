@@ -9,7 +9,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { Badge, Button, Overlay, SectionHeading } from "../components";
-import { api } from "../api";
+import { api, errorText, saveError } from "../api";
 import { dateTime, sourceLabel, type Operation, type Source } from "../data";
 import { useWorkspace } from "../workspace";
 
@@ -67,7 +67,7 @@ export default function Sources() {
             : "操作已提交，可在下方查看进度",
         );
     } catch (e) {
-      setError((e as Error).message);
+      setError(errorText(e));
     } finally {
       setBusy("");
     }
@@ -85,7 +85,7 @@ export default function Sources() {
         s.syncEnabled ? "已暂停自动同步，现有调用不受影响" : "已开启自动同步",
       );
     } catch (e) {
-      setError((e as Error).message);
+      setError(await saveError(e, refresh));
     } finally {
       setBusy("");
     }
@@ -273,7 +273,10 @@ export default function Sources() {
                 </p>
               )}
               <div className="source-card-actions">
-                <Button onClick={() => configureSource(s)}>
+                <Button
+                  aria-label={`接入设置：${s.name}`}
+                  onClick={() => configureSource(s)}
+                >
                   接入设置
                   <ArrowRight size={14} />
                 </Button>
@@ -281,12 +284,15 @@ export default function Sources() {
                   <>
                     <Button
                       disabled={busy === s.id}
+                      aria-label={`检查授权：${s.name}`}
                       onClick={() => void act(s, "check")}
                     >
                       检查授权
                     </Button>
                     <Button
                       disabled={busy === s.id}
+                      aria-label={`${s.lastInventoryAt ? "立即同步" : "预览导入"}：${s.name}`}
+                      aria-busy={busy === s.id}
                       onClick={() =>
                         void act(s, s.lastInventoryAt ? "sync" : "preview")
                       }
@@ -301,6 +307,7 @@ export default function Sources() {
                       <Button
                         variant="ghost"
                         disabled={busy === s.id}
+                        aria-label={`${s.syncEnabled ? "暂停自动同步" : "开启自动同步"}：${s.name}`}
                         onClick={() => void toggle(s)}
                       >
                         {s.syncEnabled ? "暂停自动同步" : "开启自动同步"}
@@ -423,7 +430,7 @@ function Preview({
       });
       await completed();
     } catch (e) {
-      setError((e as Error).message);
+      setError(errorText(e));
     } finally {
       setBusy(false);
     }

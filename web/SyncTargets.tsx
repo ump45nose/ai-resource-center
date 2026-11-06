@@ -1,7 +1,8 @@
-import { useEffect, useState, type FormEvent } from "react";
-import { api } from "./api";
+import { useState, type FormEvent } from "react";
+import { api, errorText, saveError } from "./api";
 import { Badge, Button, Overlay, SectionHeading } from "./components";
 import { dateTime } from "./data";
+import { usePolling } from "./hooks";
 import { useWorkspace } from "./workspace";
 type Target = {
   id: string;
@@ -40,18 +41,17 @@ const labels: Record<string, string> = {
 export default function SyncTargets() {
   const { sources, notify } = useWorkspace(),
     [targets, setTargets] = useState<Target[]>([]),
-    [edit, setEdit] = useState<Target | null>(null),
+    [editId, setEditId] = useState(""),
     [preview, setPreview] = useState<Preview | null>(null),
     [error, setError] = useState(""),
     [busy, setBusy] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
+  const edit = targets.find((t) => t.id === editId);
   const read = () =>
     api<{ items: Target[] }>("/sync/targets").then((x) => setTargets(x.items));
-  useEffect(() => {
-    void read().catch((e) => setError(e.message));
-    const t = setInterval(() => void read().catch(() => {}), 10000);
-    return () => clearInterval(t);
-  }, []);
+  usePolling(
+    (first) => void read().catch((e) => first && setError(errorText(e))),
+  );
   const act = async (id: string, fn: () => Promise<void>) => {
     setBusy(id);
     setError("");
@@ -59,7 +59,7 @@ export default function SyncTargets() {
       await fn();
       await read();
     } catch (e) {
-      setError((e as Error).message);
+      setError(await saveError(e, read));
     } finally {
       setBusy("");
     }
@@ -83,7 +83,7 @@ export default function SyncTargets() {
           version: next.version,
           key,
         });
-      setEdit(null);
+      setEditId("");
       notify("同步目标已保存，首次接管需要预览确认");
     });
   }
@@ -174,9 +174,15 @@ export default function SyncTargets() {
               </div>
             </dl>
             <div className="form-actions">
-              <Button onClick={() => setEdit(t)}>设置</Button>
+              <Button
+                aria-label={`设置：${t.name}`}
+                onClick={() => setEditId(t.id)}
+              >
+                设置
+              </Button>
               <Button
                 disabled={!!busy}
+                aria-label={`预览接管：${t.name}`}
                 onClick={() =>
                   void act(t.id, async () => {
                     const p = await api<Preview>(
@@ -199,6 +205,7 @@ export default function SyncTargets() {
                 <Button
                   variant="ghost"
                   disabled={!!busy}
+                  aria-label={`${t.enabled ? "暂停" : "继续同步"}：${t.name}`}
                   onClick={() =>
                     void act(t.id, async () => {
                       await api(`/sync/targets/${t.id}`, "PATCH", {
@@ -216,8 +223,12 @@ export default function SyncTargets() {
         ))}
       </div>
       {edit && (
-        <Overlay title={`${edit.name} 同步设置`} onClose={() => setEdit(null)}>
-          <form className="overlay-body form-stack" onSubmit={save}>
+        <Overlay title={`${edit.name} 同步设置`} onClose={() => setEditId("")}>
+          <form
+            className="overlay-body form-stack"
+            key={edit.version}
+            onSubmit={save}
+          >
             {["newapi", "all-api-hub", "sillytavern"].includes(edit.id) && (
               <label>
                 绑定来源

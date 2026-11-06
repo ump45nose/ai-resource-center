@@ -138,6 +138,8 @@ export type Channel = {
   baseUrl: string;
   protocol: string;
   models: string[];
+  activeModels: string[];
+  knownModels: string[];
   tags: ChannelTag[];
   capabilities: string[];
   applications: string[];
@@ -347,6 +349,76 @@ export type Meta = {
   automationEnabled: boolean;
   sourceSyncEnabled?: boolean;
 };
+export type MaintenancePolicy = {
+  enabled: boolean;
+  autoApply: boolean;
+  smokeEnabled: boolean;
+  smokeMaxTokens: number;
+  normalHours: number;
+  maintenanceHours: number;
+  closedHours: number;
+  keyRetryHours: number;
+  newModelsHours: number;
+  archiveAfterDays: number;
+  archiveReviewHours: number;
+  maxCandidates: number;
+  maxEvaluationsPerDay: number;
+  modelRules: { match: string; capabilityClass: "strong" | "execution" }[];
+  excludedModels: string;
+};
+export type MaintenanceState = {
+  channelId: string;
+  waitingFor: string | null;
+  validationBlocked: string | null;
+  nextCheckAt: string | null;
+  automaticReason?: string | null;
+};
+export type MaintenanceSummary = {
+  policy: MaintenancePolicy;
+  budget: { used: number; limit: number };
+  gatewayWrites: boolean;
+  tasks: { total: number; ready: number };
+  channels: MaintenanceState[];
+  coverage?: Record<
+    string,
+    {
+      channelId: string;
+      state: string;
+      nextCheckAt: string | null;
+      waitingFor: string | null;
+    }[]
+  >;
+  pilot?: {
+    state: string;
+    channelId: string;
+    modelId: string;
+    appliedAt?: string;
+  };
+  bindings?: {
+    id: string;
+    version: number;
+    taskName: string;
+    channelId: string;
+    modelId: string;
+    enabled: boolean;
+    validationOnly?: boolean;
+  }[];
+  runs?: {
+    id: string;
+    channelId: string;
+    modelId: string;
+    executionMode?: string;
+    createdAt: string;
+    completedAt?: string;
+    verification?: {
+      result: string;
+      quality: string;
+      reason?: string;
+      artifactRef?: string;
+    };
+  }[];
+  operations: Operation[];
+};
 export const pageLabels: Record<Page, string> = {
   sites: "站点",
   models: "模型",
@@ -354,6 +426,11 @@ export const pageLabels: Record<Page, string> = {
   scans: "扫描与测试",
   benefits: "签到与权益",
 };
+export const lines = (s: string) =>
+  s
+    .split(/\n|,/)
+    .map((x) => x.trim())
+    .filter(Boolean);
 export const sourceLabel = (kind: string) =>
   ({
     newapi: "New API",
@@ -394,47 +471,15 @@ export const balances = (accounts: Account[], dailyOnly = false) => {
   }
   return [...sums].map(([unit, value]) => amount(value, unit));
 };
-export const allModels = (c: Channel) => [
-  ...new Set([
-    ...c.models,
-    ...(c.hubObservation?.present !== false
-      ? c.hubObservation?.models || []
-      : []),
-    ...(c.sourceObservation?.present !== false
-      ? c.sourceObservation?.models || []
-      : []),
-    ...(c.scan?.catalogStatus === "ok" ? c.scan.catalogModels : []),
-    ...c.modelAvailability.map((o) => o.modelId),
-  ]),
-];
-export function activeModels(c: Channel) {
-  if (
-    !c.enabled ||
-    c.runtimeEnabled === false ||
-    c.synchronization?.some(
-      (s) => s.target === "newapi" && s.state !== "applied",
-    ) ||
-    c.archiveReasons.length ||
-    c.recovery.pending ||
-    ["paused", "closed", "maintenance", "removed"].includes(
-      c.management?.state || "",
-    ) ||
-    c.management?.prohibited ||
-    c.credentialStatus === "missing" ||
-    (c.usage !== "rp" &&
-      c.runtimeEnabled == null &&
-      (c.sourceObservation?.present === false ||
-        c.sourceObservation?.enabled === false))
-  )
-    return [];
-  return [...new Set(c.models)].filter(
-    (id) =>
-      c.usage === "rp" ||
-      c.runtimeEnabled === true ||
-      !c.sourceObservation ||
-      c.sourceObservation.models.includes(id),
-  );
-}
+export const syncStateLabels: Record<string, string> = {
+  pending: "待同步",
+  running: "同步中",
+  applied: "已同步",
+  failed: "同步失败",
+  conflict: "配置冲突",
+  waiting: "等待条件",
+  not_applicable: "无需接入",
+};
 export function channelStatus(c: Channel): { label: string; tone: Tone } {
   if (c.recovery.pending) return { label: c.recovery.reason, tone: "amber" };
   if (c.management?.state === "paused")
@@ -443,15 +488,12 @@ export function channelStatus(c: Channel): { label: string; tone: Tone } {
     return { label: "待补 key", tone: "amber" };
   if (c.usage !== "rp") {
     const sync = c.synchronization?.find((s) => s.target === "newapi");
-    const pending: Record<string, string> = {
-      pending: "New API 待同步",
-      running: "New API 同步中",
-      waiting: "New API 等待条件",
-      failed: "New API 同步失败",
-      conflict: "New API 配置冲突",
-    };
-    if (sync && pending[sync.state])
-      return { label: pending[sync.state], tone: "amber" };
+    if (
+      sync &&
+      !["applied", "not_applicable"].includes(sync.state) &&
+      syncStateLabels[sync.state]
+    )
+      return { label: `New API ${syncStateLabels[sync.state]}`, tone: "amber" };
     if (c.runtimeEnabled === true)
       return c.enabled
         ? { label: "New API 已启用", tone: "green" }
@@ -606,7 +648,7 @@ export const searchSites = <T extends Site>(sites: T[], query: string) =>
       ...s.channels.flatMap((c) => [
         c.name,
         c.baseUrl,
-        ...allModels(c),
+        ...c.knownModels,
         ...c.tags.map((t) => tagLabels[t]),
       ]),
     ]

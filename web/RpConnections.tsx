@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "./api";
+import { api, errorText, saveError } from "./api";
 import { Button } from "./components";
 type Connection = {
   id: string;
@@ -25,7 +25,7 @@ export default function RpConnections({ channelId }: { channelId: string }) {
       `/rp/connections?channelId=${encodeURIComponent(channelId)}`,
     ).then((r) => setItems(r.items));
   useEffect(() => {
-    void read().catch((e) => setError(e.message));
+    void read().catch((e) => setError(errorText(e)));
   }, [channelId]);
   const save = async (c: Connection, resolve?: string) => {
     try {
@@ -45,7 +45,7 @@ export default function RpConnections({ channelId }: { channelId: string }) {
       await read();
       setError("");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "保存失败");
+      setError(await saveError(e, read));
     }
   };
   return items.length ? (
