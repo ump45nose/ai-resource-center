@@ -1,11 +1,39 @@
 import { archiveLabels, archiveOf, tagsOf } from "./channel-rules.mjs";
-import { policies, reviewManaged } from "./maintenance-policy.mjs";
+import {
+  policies,
+  reviewManaged,
+  maintenanceStatus,
+} from "./maintenance-policy.mjs";
 import { observeFailure, observeSuccess, matureFailure } from "./failure-window.mjs";
 
 const nonQualityErrors = ["rate", "quota", "account", "input", "cancelled"];
+// Live calls synced from New API; migrated samples and evaluation traffic do not count.
+export const liveCalls =
+  "legacy_import=0 AND (origin IS NULL OR origin='live')";
 
 export function managedHealth(store, c) {
   return policies(store).enabled && reviewManaged(store, c);
+}
+// Real calls are judged over the last day, restarted when the connection or key changes.
+export const callWindowStart = (c, now = Date.now()) =>
+  new Date(
+    Math.max(
+      now - 86400000,
+      Date.parse(c.connectionChangedAt || 0) || 0,
+      Date.parse(c.credentialChangedAt || 0) || 0,
+    ),
+  ).toISOString();
+// The latest scan read the key's model catalog on the current connection.
+export const catalogReadable = (c) =>
+  c.catalogObservation?.status === "ok" &&
+  (c.catalogObservation.connectionVersion || 1) === (c.connectionVersion || 1);
+export function catalogListed(store, c, modelId) {
+  const catalog = store.get("offering", `${c.id}:${modelId}`)?.catalog;
+  return (
+    catalogReadable(c) &&
+    !!catalog?.present &&
+    (catalog.connectionVersion || 1) === (c.connectionVersion || 1)
+  );
 }
 export function observeChannelSuccess(store, channelId, at) {
   for (const scope of ["scan", "task", "calls"])
@@ -53,7 +81,44 @@ export function archiveChannel(store, channelId, reason, evidence) {
   });
   return true;
 }
-export function observeScanHealth(store, scan) {
+// Evidence that the channel works again ends an archive or maintenance state
+// without a test run; account and balance waits still hold.
+function recoverChannel(store, c, evidence) {
+  const failing =
+    archiveOf(c, store.get("site", c.siteId)).length > 0 ||
+    ["maintenance", "closed"].includes(c.management?.state);
+  if (!failing || !maintenanceStatus(store, c).metadataAllowed) return false;
+  observeChannelSuccess(store, c.id, evidence.at);
+  c = store.require("channel", c.id);
+  const previousIssue =
+    c.availability || c.archiveReason || c.management?.state;
+  store.put("channel", {
+    ...c,
+    enabled: true,
+    archiveReason: null,
+    availability: null,
+    callIssue: null,
+    archivedAt: null,
+    autoArchive: null,
+    management: { ...c.management, state: "active" },
+    maintenance: {
+      ...c.maintenance,
+      lastRestoredAt: evidence.at,
+      previousIssue,
+    },
+    version: c.version + 1,
+  });
+  store.action(c.id, {
+    kind: "channel_recovered",
+    source: evidence.source,
+    reason: evidence.reason,
+    previousIssue,
+    result: "restored",
+  });
+  return true;
+}
+// `readable`: channels whose catalog this scan read again after it was not readable.
+export function observeScanHealth(store, scan, readable = new Set()) {
   let changed = false;
   for (const catalog of scan.channelCatalogs || []) {
     let c = store.require("channel", catalog.channelId);
@@ -127,17 +192,27 @@ export function observeScanHealth(store, scan) {
           ...evidence,
           reason: issue.note,
         }) || changed;
-    else if (catalog.status === "ok")
+    else if (catalog.status === "ok") {
       observeSuccess(store, "channel", c.id, "scan", scan.scannedAt);
+      if (readable.has(c.id))
+        changed =
+          recoverChannel(store, store.require("channel", c.id), {
+            ...evidence,
+            reason: "模型目录恢复可读",
+          }) || changed;
+    }
   }
   return changed;
 }
-export function routableModels(store, c) {
+// A blocked model returns to routing once its last real failure leaves the call window.
+export function routableModels(store, c, now = Date.now()) {
+  const since = callWindowStart(c, now);
   return (c.models || []).filter((model) => {
     const health = store.get("offering", `${c.id}:${model}`)?.health;
     return (
       !health?.blocked ||
-      health.connectionVersion !== (c.connectionVersion || 1)
+      health.connectionVersion !== (c.connectionVersion || 1) ||
+      !(health.at >= since)
     );
   });
 }
@@ -232,17 +307,17 @@ export function observeTaskHealth(store, offering, verification) {
     reason: next.reason || "任务未通过",
   });
 }
+// A manual restore clears the block; real calls made before it no longer count.
 export function clearModelHealth(store, offeringId) {
   const o = store.require("offering", offeringId);
   if (o.health)
     store.put("offering", {
       ...o,
       health: {
-        connectionVersion: o.verification.connectionVersion || 1,
+        connectionVersion:
+          store.require("channel", o.channelId).connectionVersion || 1,
         blocked: false,
-        taskFailures: 0,
-        hadSuccess: true,
-        lastTaskSuccessAt: o.verification.at,
+        clearedAt: new Date().toISOString(),
       },
     });
 }
@@ -251,16 +326,10 @@ export function reconcileCallHealth(store, channelIds) {
   for (const c of store
     .list("channel")
     .filter((c) => channelIds.includes(c.id) && managedHealth(store, c))) {
-    const since = new Date(
-      Math.max(
-        Date.now() - 86400000,
-        Date.parse(c.connectionChangedAt || 0) || 0,
-        Date.parse(c.credentialChangedAt || 0) || 0,
-      ),
-    ).toISOString();
+    const since = callWindowStart(c);
     const latest = store.db
       .prepare(
-        "SELECT occurred_at,result,error_type FROM calls WHERE channel_id=? AND occurred_at>=? AND legacy_import=0 AND (origin IS NULL OR origin='live') ORDER BY occurred_at DESC,rowid DESC LIMIT 1",
+        `SELECT occurred_at,result,error_type FROM calls WHERE channel_id=? AND occurred_at>=? AND ${liveCalls} ORDER BY occurred_at DESC,rowid DESC LIMIT 1`,
       )
       .get(c.id, since);
     if (latest?.result === "success")
