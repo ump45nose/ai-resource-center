@@ -34,6 +34,13 @@ const tabs = [
   ["client", "客户端绑定（Code）"],
   ["issue", "待处理"],
 ] as const;
+const imageOrder = {
+  success: 0,
+  pending: 1,
+  failure: 2,
+  unknown: 3,
+  skipped: 4,
+};
 
 export function isIssue(site: Site, chans: Channel[]) {
   return (
@@ -56,6 +63,42 @@ export default function Resources() {
   const q = query.trim().toLowerCase();
   const chansOf = (id: string) => s.channels.filter((c) => c.siteId === id);
   const exception = exceptionGroups.find((g) => g.id === sub);
+  const imageTests = [
+    ...new Map(
+      s.evals
+        .filter(
+          (e) =>
+            e.imageAudit &&
+            s.channels.some(
+              (c) => c.id === e.channelId && c.category === "media",
+            ),
+        )
+        .map((e) => [e.channelId, e]),
+    ).values(),
+  ].sort(
+    (a, b) =>
+      imageOrder[a.imageAudit!.result] - imageOrder[b.imageAudit!.result],
+  );
+  const imageSites = new Map<
+    string,
+    { website: Site; tests: typeof imageTests }
+  >();
+  for (const e of imageTests) {
+    const channel = s.channels.find((c) => c.id === e.channelId)!;
+    const website = s.sites.find((site) => site.id === channel.siteId)!;
+    const host = new URL(website.url).host;
+    const group = imageSites.get(host) || { website, tests: [] };
+    if (
+      !group.tests.some(
+        (test) =>
+          e.imageAudit?.requestEvaluationId &&
+          test.imageAudit?.requestEvaluationId ===
+            e.imageAudit.requestEvaluationId,
+      )
+    )
+      group.tests.push(e);
+    imageSites.set(host, group);
+  }
   const inCategory = (site: Site, category: string) =>
     chansOf(site.id).some(
       (c) => c.category === category && !resourceGroup(c, site),
@@ -128,6 +171,73 @@ export default function Resources() {
           </button>
         ))}
       </div>
+      {sub === "media" && imageTests.length > 0 && (
+        <div className="mb-5">
+          <Section title="生图实测" desc="最近一次结果；点击图片查看原图">
+            <div className="grid gap-4 p-4 md:grid-cols-2 xl:grid-cols-3">
+              {[...imageSites.values()].map(({ website, tests }, siteIndex) => (
+                <article
+                  key={website.id}
+                  className="min-w-0 rounded-md border border-zinc-200 p-3 text-sm"
+                >
+                  <Url href={website.url} />
+                  {tests.map((e) => (
+                    <div
+                      key={e.id}
+                      className="mt-2 border-t border-zinc-100 pt-2 first-of-type:border-0"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="break-words text-xs text-zinc-500">
+                          {e.model}
+                        </span>
+                        <Badge
+                          tone={
+                            e.imageAudit?.result === "success"
+                              ? "ok"
+                              : e.imageAudit?.result === "failure"
+                                ? "err"
+                                : e.imageAudit?.result === "pending"
+                                  ? "info"
+                                  : "mute"
+                          }
+                          icon={null}
+                        >
+                          {e.imageAudit?.result === "success"
+                            ? "已出图"
+                            : e.imageAudit?.result === "failure"
+                              ? "调用失败"
+                              : e.imageAudit?.result === "pending"
+                                ? "生成中"
+                                : e.imageAudit?.result === "unknown"
+                                  ? "结果未确认"
+                                  : "未测试"}
+                        </Badge>
+                      </div>
+                      {e.image && (
+                        <a
+                          href={`/api/v1/evaluations/${e.id}/image`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          <img
+                            src={`/api/v1/evaluations/${e.id}/image`}
+                            alt={`${website.name} 生图结果`}
+                            loading={siteIndex < 3 ? "eager" : "lazy"}
+                            className="mt-3 aspect-square w-full rounded object-contain bg-zinc-50"
+                          />
+                        </a>
+                      )}
+                      <p className="mt-2 break-words text-xs text-zinc-600">
+                        {e.summary}
+                      </p>
+                    </div>
+                  ))}
+                </article>
+              ))}
+            </div>
+          </Section>
+        </div>
+      )}
       {exception ? (
         <Exceptions group={exception.id} label={exception.label} />
       ) : sub === "rp" ? (

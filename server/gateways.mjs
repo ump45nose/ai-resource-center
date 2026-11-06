@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import { randomUUID, randomBytes } from "node:crypto";
-import { Problem } from "./center.mjs";
+import { Problem, listGroups } from "./center.mjs";
 import { hash } from "./store.mjs";
 import {
   errorType,
@@ -552,7 +552,9 @@ export class Gateways {
       this.store.put("channel", {
         ...current,
         callObservedAt: time,
-        ...(result === "success" ? { availability: undefined } : {}),
+        ...(result === "success" && !listGroups[current.availability]
+          ? { availability: undefined }
+          : {}),
         callIssue:
           result === "failure" && reasons[detail.errorType]
             ? { reason: reasons[detail.errorType], model, at: time }

@@ -4,6 +4,8 @@ export const exceptionGroups = [
   { id: "unreachable", label: "网站打不开" },
   { id: "exhausted", label: "无余额无签到" },
   { id: "invalid", label: "网站或 key 失效" },
+  { id: "unstable", label: "调用不稳定" },
+  { id: "callFailed", label: "调用失败" },
   { id: "maintenance", label: "暂停维护" },
 ] as const;
 

@@ -1,7 +1,11 @@
 services:
   ai-resource-center:
+    init: true
+    mem_limit: 512m
+    memswap_limit: 640m
+    cgroup_parent: nascontainers.slice
     build: .
-    image: ai-resource-center:20261014
+    image: ai-resource-center:20261021-native-media-results
     container_name: ai-resource-center
     restart: unless-stopped
     ports:

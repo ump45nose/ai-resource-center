@@ -5,6 +5,8 @@ data
 .integration
 docs
 tests
-scripts
+scripts/*
+!scripts/scan-models.mjs
+!scripts/scan-models-browser.mjs
 dist
 .env

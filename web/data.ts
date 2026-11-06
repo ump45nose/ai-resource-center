@@ -22,7 +22,13 @@ export interface Channel {
   category: Category;
   gateway?: { sourceId: string; channelId?: number };
   availability?: string;
-  listGroup?: "exhausted" | "invalid" | "maintenance" | "removed";
+  listGroup?:
+    | "exhausted"
+    | "invalid"
+    | "unstable"
+    | "callFailed"
+    | "maintenance"
+    | "removed";
   weight: number;
   hasKey: boolean;
   tavern?: {
@@ -117,6 +123,13 @@ export interface Evaluation {
   summary: string;
   rating: "" | "优" | "良" | "差";
   records?: number;
+  image?: { file: string; mime: string };
+  imageAudit?: {
+    result: "pending" | "success" | "failure" | "skipped" | "unknown";
+    reason?: string;
+    shared?: boolean;
+    requestEvaluationId?: string;
+  };
 }
 export interface Integration {
   id: string;

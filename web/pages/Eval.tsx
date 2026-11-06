@@ -225,7 +225,7 @@ export default function Eval() {
         </Section>
         <Section title="评估登记">
           <ul className="divide-y divide-zinc-100">
-            {s.evals.map((e) => {
+            {[...s.evals].reverse().map((e) => {
               const c = s.channels.find((x) => x.id === e.channelId);
               const d = endDraft[e.id] || { summary: "", rating: "" as const };
               return (
@@ -259,7 +259,13 @@ export default function Eval() {
                   <div className="mt-0.5 text-xs text-zinc-500">
                     {c?.name} · {e.model} · {e.client} · 请求级记录：
                     <span className="text-amber-700">
-                      {e.records ? `${e.records} 条` : "未采集"}
+                      {e.records
+                        ? `${e.records} 条`
+                        : e.imageAudit?.shared
+                          ? "共用同凭据结果"
+                          : e.imageAudit?.result === "skipped"
+                            ? "未发起"
+                            : "未采集"}
                     </span>
                   </div>
                   <div className="text-xs text-zinc-500">
@@ -269,6 +275,20 @@ export default function Eval() {
                     <div className="mt-1 text-xs text-zinc-700">
                       摘要：{e.summary}
                     </div>
+                  )}
+                  {e.image && (
+                    <a
+                      href={`/api/v1/evaluations/${e.id}/image`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <img
+                        src={`/api/v1/evaluations/${e.id}/image`}
+                        alt={`${c?.name} · ${e.model} 生图结果`}
+                        loading="lazy"
+                        className="mt-3 max-h-80 max-w-full rounded-md border border-zinc-200"
+                      />
+                    </a>
                   )}
                   {e.state === "prepared" && (
                     <div className="mt-2">

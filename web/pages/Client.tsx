@@ -4,6 +4,7 @@ import { useStore } from "../store";
 import { Badge, Btn, Url, ApplyBadge } from "../ui";
 import { ChannelDrawer, ConfigDrawer, ConflictDrawer } from "../shared";
 import type { Channel } from "../data";
+import { resourceGroup } from "../resourceGroups";
 
 function Card({ c }: { c: Channel }) {
   const { s, act } = useStore();
@@ -145,7 +146,11 @@ export default function ClientView() {
         推理身份，真实任务成功后再确认可用。调用记录见「渠道评价」。
       </p>
       {s.channels
-        .filter((c) => c.category === "client")
+        .filter(
+          (c) =>
+            c.category === "client" &&
+            !resourceGroup(c, s.sites.find((site) => site.id === c.siteId)!),
+        )
         .map((c) => (
           <Card key={c.id} c={c} />
         ))}

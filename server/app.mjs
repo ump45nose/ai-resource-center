@@ -129,6 +129,14 @@ export async function createApp({
     return { authenticated: false };
   });
   app.get("/api/v1/state", async () => center.state());
+  app.get("/api/v1/evaluations/:id/image", async (req, reply) => {
+    const evaluation = store.get("evaluation", req.params.id);
+    if (!evaluation?.image) throw new Problem(404, "这次评估没有图片");
+    return reply
+      .type(evaluation.image.mime)
+      .header("Cache-Control", "private, max-age=3600")
+      .send(readFileSync(join(dir, "evaluation-images", evaluation.image.file)));
+  });
   app.get("/api/v1/overview", async () => {
     const s = center.state();
     return {

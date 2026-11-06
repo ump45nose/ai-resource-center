@@ -13,6 +13,8 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./
 COPY server ./server
+COPY scripts/scan-models.mjs ./scripts/scan-models.mjs
+COPY scripts/scan-models-browser.mjs ./scripts/scan-models-browser.mjs
 USER node
 ENV PORT=18321 DATA_DIR=/data
 EXPOSE 18321

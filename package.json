@@ -7,7 +7,9 @@
     "dev": "vite --host 127.0.0.1 --port 18322",
     "server": "node server/main.mjs",
     "build": "tsc --noEmit && vite build",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "scan:models": "node scripts/scan-models.mjs",
+    "scan:models:browser": "node scripts/scan-models-browser.mjs"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",

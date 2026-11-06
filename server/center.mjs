@@ -42,9 +42,11 @@ const defaults = {
   reason: "尚未采集",
   apply: "pending",
 };
-const listGroups = {
+export const listGroups = {
   "归档-无余额无签到": "exhausted",
   "归档-网站或key失效": "invalid",
+  "归档-调用不稳定": "unstable",
+  "待复核-调用失败": "callFailed",
   "暂停维护(模型不足或者服务维护)": "maintenance",
   已移除: "removed",
 };
@@ -261,22 +263,33 @@ export class Center {
     const channels = this.store
       .list("channel")
       .map((c) => this.publicChannel(c));
+    const removedChannels = new Set(
+      channels.filter((c) => c.listGroup === "removed").map((c) => c.id),
+    );
+    const visibleChannels = channels.filter((c) => !removedChannels.has(c.id));
+    const removedSites = new Set(
+      channels.filter((c) => removedChannels.has(c.id)).map((c) => c.siteId),
+    );
+    for (const c of visibleChannels) removedSites.delete(c.siteId);
     for (const s of sites) {
       s.categories = [
         ...new Set(
-          channels.filter((c) => c.siteId === s.id).map((c) => c.category),
+          visibleChannels.filter((c) => c.siteId === s.id).map((c) => c.category),
         ),
       ];
       s.category = s.categories[0] || "general";
     }
     const sources = this.store.setting("sources") || [];
     return {
-      sites,
-      accounts,
-      channels,
-      evals: this.store.list("evaluation"),
+      sites: sites.filter((s) => !removedSites.has(s.id)),
+      accounts: accounts.filter((a) => !removedSites.has(a.siteId)),
+      channels: visibleChannels,
+      evals: this.store
+        .list("evaluation")
+        .filter((e) => !removedChannels.has(e.channelId)),
       identities: this.store
         .list("identity")
+        .filter((i) => !removedChannels.has(i.channelId))
         .map(({ credentialId, pendingCredentialId, name, ...i }) => i),
       rules: this.store.setting("rules") || {
         days: 7,
