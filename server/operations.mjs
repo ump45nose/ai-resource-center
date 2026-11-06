@@ -53,6 +53,16 @@ export class Operations {
       version: old.version + 1,
     });
   }
+  // Finished operations are kept forever; read only those in the given states, oldest first.
+  // Without statistics SQLite picks the kind index for several states and reads every operation.
+  withState(...states) {
+    return this.store
+      .sql(
+        `SELECT id,data,version FROM entities INDEXED BY entities_operation_state WHERE kind='operation' AND json_extract(data,'$.state') IN (${states.map(() => "?").join()}) ORDER BY rowid`,
+      )
+      .all(...states)
+      .map((r) => ({ ...JSON.parse(r.data), id: r.id, version: r.version }));
+  }
   recover() {
     for (const op of this.store
       .list("operation")
@@ -98,18 +108,8 @@ export class Operations {
     this.running = true;
     try {
       while (!this.closed) {
-        // Finished operations are kept forever; look up only the oldest queued one.
-        const row = this.store
-          .sql(
-            "SELECT id,data,version FROM entities WHERE kind='operation' AND json_extract(data,'$.state')='queued' ORDER BY rowid LIMIT 1",
-          )
-          .get();
-        if (!row) break;
-        const op = {
-          ...JSON.parse(row.data),
-          id: row.id,
-          version: row.version,
-        };
+        const [op] = this.withState("queued");
+        if (!op) break;
         this.update(op.id, {
           state: "running",
           startedAt: new Date().toISOString(),

@@ -20,9 +20,7 @@ export class Scheduler {
       this.store.setting(`schedule:${key}`, now);
       return true;
     };
-    const active = this.store
-      .list("operation")
-      .filter((o) => ["queued", "running"].includes(o.state));
+    const active = this.operations.withState("queued", "running");
     for (const s of this.store.setting("sources") || []) {
       if (
         s.kind !== "newapi" ||

@@ -713,18 +713,22 @@ export function capabilities({
     "/operations",
     "扫描与测试运行列表",
     { ...listing, state: text.optional(), kind: text.optional() },
-    (a) =>
-      paginate(
+    (a) => {
+      // Page through ids, newest first, so only the returned operations are parsed.
+      const page = paginate(
         store
-          .list("operation")
-          .filter(
-            (o) =>
-              (!a.state || o.state === a.state) &&
-              (!a.kind || o.kind === a.kind),
+          .sql(
+            `SELECT id FROM entities WHERE kind='operation'${a.state ? " AND json_extract(data,'$.state')=?" : ""}${a.kind ? " AND json_extract(data,'$.kind')=?" : ""} ORDER BY rowid DESC`,
           )
-          .reverse(),
+          .all(...[a.state, a.kind].filter(Boolean))
+          .map((r) => r.id),
         a,
-      ),
+      );
+      return {
+        ...page,
+        items: page.items.map((id) => store.get("operation", id)),
+      };
+    },
   );
   add(
     "sync_source",
