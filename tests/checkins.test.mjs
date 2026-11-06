@@ -213,6 +213,68 @@ test("a UTC business-day site is judged by its own current day", async (t) => {
   assert.equal(noon.checkinSummary.completed, 0);
 });
 
+test("a Hub inventory with a site-keyed business date is accepted and lines up with that site's events", async (t) => {
+  const f = await fixture(t);
+  const token = issueToken(f.store, "ingest", { sourceId: "all-api-hub" });
+  const row = (id, checkin) => ({
+    id,
+    name: `${id} 账号`,
+    site: { name: id, url: `https://${id}.test` },
+    observedAt: "2026-11-06T01:05:00.000Z",
+    balance: 2,
+    unit: "USD",
+    enabled: true,
+    siteType: "sub2api",
+    checkin: { enabled: true, supportStatus: "supported", supported: true, ...checkin },
+  });
+  // Chatflows resets at noon, so 09:00 on 11-06 is still the period keyed 2026-11-05.
+  const chatflows = {
+    configured: true,
+    availability: "enabled",
+    statusObservedAt: "2026-11-06T01:00:00.000Z",
+    businessDate: "2026-11-05",
+    lastCheckInDate: "2026-11-06",
+    isCheckedInToday: true,
+  };
+  const inventory = (eventId, accounts) =>
+    f.call(
+      "POST",
+      "/api/v2/ingest/inventory",
+      { eventId, occurredAt: "2026-11-06T01:05:00.000Z", deviceId: "device", accounts },
+      token,
+    );
+  const malformed = await inventory("malformed", [row("chatflows", { ...chatflows, businessDate: "2026/11/05" })]);
+  assert.equal(malformed.statusCode, 400, malformed.body);
+  const accepted = await inventory("inventory", [row("chatflows", chatflows), row("plain", {})]);
+  assert.equal(accepted.statusCode, 200, accepted.body);
+  assert.deepEqual(accepted.json(), { eventId: "inventory", created: 2, updated: 0, removed: 0 });
+  const id = (external) => f.store.ref("all-api-hub", "account", external);
+  assert.equal(f.store.require("account", id("plain")).balance, 2);
+  assert.equal(
+    f.store.require("account", id("chatflows")).sourceObservation.checkin.businessDate,
+    "2026-11-05",
+  );
+
+  await report(f, token, "chatflows", "成功", {
+    occurredAt: "2026-11-05T04:10:00.000Z",
+    businessDate: "2026-11-05",
+    timezone: "Asia/Shanghai",
+    reward: "25 quota",
+  });
+  const morning = dailyResources(f.resources, new Date("2026-11-06T02:00:00.000Z"));
+  const status = stateOf(morning, id("chatflows"));
+  assert.deepEqual(
+    [status.state, status.basis, status.businessDate, status.timezone],
+    ["done", "event", "2026-11-05", "Asia/Shanghai"],
+  );
+  const item = morning.checkinSummary.items.find((r) => r.accountId === id("chatflows"));
+  assert.equal(item.id, `2026-11-05:${id("chatflows")}`);
+  assert.equal(item.rewardText, "25 quota");
+
+  const stale = stateOf(dailyResources(f.resources, new Date("2026-11-07T02:00:00.000Z")), id("chatflows"));
+  assert.deepEqual([stale.state, stale.businessDate], ["pending", "2026-11-07"]);
+});
+
 test("site payloads and the overview expose the same check-in status", async (t) => {
   const f = await fixture(t);
   const token = issueToken(f.store, "ingest", { sourceId: "all-api-hub" });

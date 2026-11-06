@@ -71,7 +71,8 @@ Personal Hub 的只读接入复用 `read` 凭据和已有概览、站点、来�
 `checkinToday`（含 `checkinAccount`）是同一结果，WebUI 直接展示。`state` 为
 `done/not_needed/action_required/failed/pending/not_applicable`，`basis` 标明依据：
 签到记录 `event`、站点状态 `site_status`、插件人工标记 `manual_mark`、设置 `settings`、尚无记录 `none`。
-每个账号按签到记录的时区取当前业务日（缺省为签到账号的重置时区，再缺省 Asia/Taipei），
+每个账号按签到记录的时区取当前业务日（缺省为签到账号的重置时区，再缺省 Asia/Taipei）；
+插件随当日签到状态上报站点自己的业务日 `checkin.businessDate`（如中午重置的 Chatflows）时以它为准。
 `daily.date` 仍按 Asia/Taipei。`expected = completed + failed + unconfirmed + notNeeded + notObserved`：
 站点状态或人工标记显示今日已签到也计入 `completed`，对应 `items` 的 `method` 为“站点状态”或“人工标记”；
 余额高于门槛、站点暂不允许签到、无可用签到方式时无需签到，自动签到账号计入新增的 `notNeeded`，

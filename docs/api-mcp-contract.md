@@ -140,7 +140,7 @@ MCP 提供管理动作，不提供任意 shell、任意 URL 请求或凭据导�
 
 | 路径 | 载荷与确认 |
 | --- | --- |
-| `POST /api/v2/ingest/inventory` | `eventId, occurredAt, deviceId, accounts, removedAccountIds`；账号包含站点／签到地址、原生 ID、观察时间、余额与单位、启停和签到设置；返回同一 `eventId` 及新增／更新数量 |
+| `POST /api/v2/ingest/inventory` | `eventId, occurredAt, deviceId, accounts, removedAccountIds`；账号包含站点／签到地址、原生 ID、观察时间、余额与单位、启停和签到设置；签到状态可附站点自己的业务日 `checkin.businessDate`（`YYYY-MM-DD`）；返回同一 `eventId` 及新增／更新数量 |
 | `POST /api/v2/ingest/credentials` | `eventId, occurredAt, accountId, complete, credentials, error?`；key 条目包含原生 ID、地址、协议、已有明文 key 或不可取得状态、模型限制及请求头；返回同一 `eventId` 和已保存的来源 key ID |
 | `POST /api/v2/ingest/events` | 原账号／签到事件批次，返回 `acknowledgedIds`；旧 `/api/v1/ingest` 保持兼容 |
 

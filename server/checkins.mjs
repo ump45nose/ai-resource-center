@@ -171,7 +171,9 @@ function zoneOf(...zones) {
 // Precedence: disabled account, then any completion (event, site status, manual
 // mark), archive, today's newest due event unless a later site status says no
 // check-in is possible, and finally the automation settings.
-function checkinStatus({ account, executor, shared, group, automatic, timezone, businessDate }) {
+function checkinStatus({
+  account, executor, shared, observation, statusToday, group, automatic, timezone, today, businessDate,
+}) {
   const make = (state, label, tone, detail, basis, more) => ({
     state, label, tone, detail, basis, reason: null, method: null, confirmedAt: null,
     businessDate, timezone, ...more,
@@ -184,16 +186,13 @@ function checkinStatus({ account, executor, shared, group, automatic, timezone, 
       confirmed.result === "成功" && automaticMethods.includes(confirmed.method) ? "已自动签到" : "今日已签到",
       "green", "今日签到完成", "event",
       { reason: confirmed.reason || null, method: confirmed.method || null, confirmedAt: group.row.confirmedAt });
-  const observation = !shared && executor.sourceObservation?.present !== false
-    ? executor.sourceObservation : null;
   const facts = observation?.checkin;
   const day = (at) => (Number.isFinite(Date.parse(at)) ? dayKey(at, timezone) : null);
-  const statusToday = !!facts && day(facts.statusObservedAt) === businessDate;
   if (statusToday && facts.isCheckedInToday === true)
     return make("done", "今日已签到", "green", "站点状态显示今日已签到", "site_status",
       { method: "站点状态", confirmedAt: facts.statusObservedAt });
-  if (facts && facts.isCheckedInToday !== false && (facts.lastCheckInDate === businessDate ||
-      (day(observation.observedAt) === businessDate && facts.isCheckedInToday === true)))
+  if (facts && facts.isCheckedInToday !== false && (facts.lastCheckInDate === today ||
+      (day(observation.observedAt) === today && facts.isCheckedInToday === true)))
     return make("done", "已标记签到", "green", "插件中的人工标记，不是执行结果", "manual_mark",
       { method: "人工标记", confirmedAt: observation.observedAt || null });
   if (executor.checkinArchive?.active)
@@ -262,11 +261,20 @@ export function checkinStates(store, data, now = new Date(), only) {
     const executor = executorOf(account);
     const shared = ids.beneficiaries.get(executor.id)?.length > 1;
     const own = shared ? [] : byAccount.get(account.id) || [];
+    const observation = !shared && executor.sourceObservation?.present !== false
+      ? executor.sourceObservation : null;
     const timezone = zoneOf(own[0]?.events[0].timezone, executor.benefit?.tz);
-    const businessDate = dayKey(now, timezone);
+    const today = dayKey(now, timezone), facts = observation?.checkin;
+    const statusToday = Number.isFinite(Date.parse(facts?.statusObservedAt)) &&
+      dayKey(facts.statusObservedAt, timezone) === today;
+    // A site that keys its own period (Chatflows resets at noon) reports the key
+    // with a same-day status, and its events carry the same key.
+    const businessDate = (statusToday && facts.businessDate) || today;
     const group = own.find((g) => g.row.businessDate === businessDate);
     const automatic = account.enabled !== false && automaticCheckin(store, account);
-    const status = checkinStatus({ account, executor, shared, group, automatic, timezone, businessDate });
+    const status = checkinStatus({
+      account, executor, shared, observation, statusToday, group, automatic, timezone, today, businessDate,
+    });
     const row = status.basis === "event" && status.state !== "not_needed" ? { ...group.row, timezone }
       : status.state === "done" ? {
         id: `${businessDate}:${account.id}`, accountId: account.id, executorAccountId: executor.id,
