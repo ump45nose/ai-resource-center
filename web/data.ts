@@ -521,7 +521,7 @@ export function hubCheckinUrl(
   site: Pick<Site, "websiteUrl" | "checkinUrl">,
   account: Account,
 ) {
-  const configured = site.checkinUrl || account.sourceObservation?.checkinUrl;
+  const configured = account.sourceObservation?.checkinUrl || site.checkinUrl;
   if (configured) return configured;
   // All API Hub's declared page routes; no network discovery is performed here.
   const paths: Record<string, string> = {

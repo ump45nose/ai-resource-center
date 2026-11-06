@@ -638,7 +638,7 @@ export class Resources {
           ...publicValue(a),
           ...(rights.balanceBasis === "fixed_daily" ? {balance: rights.balance} : {}),
           automaticCheckin: a.enabled !== false && automaticCheckin(this.store, a),
-          integration: this.distribution?.hubEligibility(a),
+          integration: this.distribution?.hubView(a),
           entitlement: rights,
           checkins,
           ...(executor.id !== a.id

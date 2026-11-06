@@ -125,6 +125,51 @@ export function migrateRpRemoval(store) {
   });
 }
 
+// Earlier jobs also pushed name, address, check-in entry and enabled state;
+// those fields now belong to the extension, so its values win.
+export function migrateHubWriteBack(store) {
+  const key = "migration:hub-checkin-writeback-v1";
+  if (store.setting(key)) return null;
+  return store.transaction(() => {
+    const at = new Date().toISOString(),
+      reason =
+        "名称、地址、签到入口和停用状态以插件为准，中心只回写自动签到开关；旧任务按插件当前值处理";
+    const links = store
+      .list("targetLink")
+      .filter((l) => l.target === "all-api-hub" && l.state === "conflict");
+    for (const l of links)
+      store.put("targetLink", {
+        ...l,
+        state: l.appliedAt ? "applied" : "adopted",
+        conflictSnapshot: null,
+      });
+    const jobs = store
+      .list("delivery")
+      .filter(
+        (j) =>
+          j.target === "all-api-hub" &&
+          !["applied", "superseded"].includes(j.state),
+      );
+    for (const j of jobs)
+      store.put("delivery", {
+        ...j,
+        state: "superseded",
+        supersededAt: at,
+        reason,
+      });
+    const record = {
+      at,
+      conflicts: links.map((l) => ({
+        id: l.id,
+        conflictSnapshot: l.conflictSnapshot,
+      })),
+      deliveries: jobs.map((j) => ({ id: j.id, state: j.state })),
+    };
+    store.setting(key, record);
+    return record;
+  });
+}
+
 // Use only together with the release that still manages RP channels; this
 // release would remove them again on its next start.
 export function revertRpRemoval(store) {

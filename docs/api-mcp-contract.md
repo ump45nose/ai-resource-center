@@ -15,6 +15,7 @@
 - `GET /sync/jobs?target=&subject=`、`GET /sync/jobs/{id}/diff`、`POST /sync/jobs/{id}/retry`、`POST /sync/jobs/{id}/resolve`：处理任务、非秘密差异和冲突；选择 `choice=target|center`。镜像不接受反向采用。
 - `PUT /sync/targets/notion/credential`：提交 `version,key`，密文留在 fn。Notion 仅更新约定字段，按中心标识及唯一网站关联既有条目。
 - `GET /connector/jobs`、`POST /connector/receipts`：只接受独立 `connector` 授权，绑定来源和目标（`all-api-hub` 或 `chrome-bookmarks`）；不是原 `ingest` 的额外权限。绑定 `sillytavern` 的旧凭据和 `rp` 凭据返回 `410`（`code: gone`）。任务领取含两分钟租约；回执按任务和租约去重。
+- All API Hub 账号任务只在中心的自动签到决定变化、且与插件当前开关不同时产生。`payload.automaticExecutionEnabled` 是中心决定，`payload.reason` 为 `archived/delegated/restored`；`name`、`checkinUrl`（`customCheckIn.url` 或 null）、`disabled` 是领取时插件的当前值，`expected` 同为当前值。插件冲突回执若只因插件字段变化，任务以 `force` 重新排队；插件已是目标开关时任务作废。中心不再为名称、地址、签到入口或启停报冲突；当前值不完整时不产生任务，`/sync/jobs` 返回 `retryable:false` 的计算行说明等待原因。站点详情的账号 `integration` 增加 `extension`（插件当前值）和 `automaticCheckin`（中心决定）。
 
 任务状态 `pending/running/applied/waiting/failed/conflict/superseded` 表示配置同步状态，不是模型验证结论。中心保存先入队；浏览器离线不显示已生效。账号与签到、New API 渠道分别显示同步结果；渠道启停采用网关实际观察或写入回读。来源回流发现托管字段变化时显示冲突，由用户采用目标配置或恢复中心配置。普通查询和 MCP 不返回 key、认证请求头或原生凭据引用。
 

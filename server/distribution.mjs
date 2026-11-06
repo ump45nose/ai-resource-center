@@ -35,28 +35,33 @@ const targetNames = {
   "chrome-bookmarks": "Chrome 书签",
 };
 const now = () => new Date().toISOString();
-const hubOptional = ["automaticExecutionEnabled", "disabled"];
-const hubOwnsField = (payload, field) =>
-  !hubOptional.includes(field) || payload?.[field] != null;
-// An applied receipt may leave out fields it took as delivered; they keep the delivered value.
-const hubReported = (snapshot, payload, field) =>
-  (
-    hubOptional.includes(field)
-      ? snapshot[field] != null
-      : Object.hasOwn(snapshot, field)
-  )
-    ? snapshot[field]
-    : payload?.[field];
-// The resolved entry URL may be a native default, not a saved custom setting.
-const hubConfiguration = (observation, previous = {}) => ({
-  ...previous,
-  name: observation.siteName,
-  disabled: observation.enabled === false,
-  automaticExecutionEnabled: observation.checkin?.enabled,
-  ...(Object.hasOwn(observation.checkin || {}, "customUrl")
-    ? { checkinUrl: observation.checkin.customUrl }
-    : {}),
+const later = (minutes) =>
+  new Date(Date.now() + minutes * 60000).toISOString();
+// The extension's own account snapshot: site_name, customCheckIn.url || null,
+// automaticExecutionEnabled and !!disabled.
+const hubFields = [
+  "name",
+  "checkinUrl",
+  "automaticExecutionEnabled",
+  "disabled",
+];
+const hubExact = (s) =>
+  typeof s?.name === "string" &&
+  (s.checkinUrl === null || typeof s.checkinUrl === "string") &&
+  typeof s.automaticExecutionEnabled === "boolean" &&
+  typeof s.disabled === "boolean";
+// site.checkinUrl in the inventory may be a static route; only
+// checkin.customUrl is the saved custom entry.
+const hubObserved = (o) => ({
+  name: o.siteName,
+  checkinUrl: Object.hasOwn(o.checkin || {}, "customUrl")
+    ? o.checkin.customUrl
+    : undefined,
+  automaticExecutionEnabled: o.checkin?.enabled,
+  disabled: typeof o.enabled === "boolean" ? !o.enabled : undefined,
 });
+const hubWaiting = "等待插件回报当前名称、签到入口和停用状态，暂不下发";
+const hubInPlace = "插件已是中心要求的自动签到状态";
 const owned = (r) => ({
   name: r.name,
   base_url: r.base_url || "",
@@ -108,6 +113,59 @@ export class Distribution {
       return { state: "not_applicable", reason: "无需签到且未关联插件账号" };
     return { state: "needs_link", reason: "需要在插件完成登录关联" };
   }
+  hubAccounts() {
+    const sites = new Set(
+      this.store
+        .list("site")
+        .filter((s) => !s.removed && !s.mergedInto)
+        .map((s) => s.id),
+    );
+    return this.store
+      .list("account")
+      .filter(
+        (a) =>
+          !a.mergedInto &&
+          sites.has(a.siteId) &&
+          this.hubEligibility(a).state !== "not_applicable",
+      );
+  }
+  // Newest of the last receipt and the inventory, or null unless it is exact.
+  hubCurrent(a, link) {
+    const source = this.config("all-api-hub").sourceId || "all-api-hub",
+      o = a?.sourceObservation;
+    if (o?.source === source && o.present === false) return null;
+    const latest = [
+      link?.reported ||
+        (link?.appliedAt && link.snapshot
+          ? { at: link.appliedAt, snapshot: link.snapshot }
+          : null),
+      o?.source === source ? { at: o.observedAt, snapshot: hubObserved(o) } : null,
+    ]
+      .filter(Boolean)
+      .sort((x, y) => Date.parse(y.at) - Date.parse(x.at))[0];
+    return hubExact(latest?.snapshot)
+      ? Object.fromEntries(hubFields.map((k) => [k, latest.snapshot[k]]))
+      : null;
+  }
+  hubDecision(a, link) {
+    if (a.checkinArchive?.active)
+      return { automaticExecutionEnabled: false, reason: "archived" };
+    if (a.checkinAccountId)
+      return { automaticExecutionEnabled: false, reason: "delegated" };
+    if (link?.checkinHold)
+      return { automaticExecutionEnabled: true, reason: "restored" };
+    return { automaticExecutionEnabled: null, reason: null };
+  }
+  hubView(a) {
+    const status = this.hubEligibility(a);
+    if (status.state !== "linked") return status;
+    const link = this.store.get("targetLink", `all-api-hub:${a.id}`);
+    return {
+      ...status,
+      extension: this.hubCurrent(a, link),
+      automaticCheckin: this.hubDecision(a, link),
+    };
+  }
   managedEntries(id) {
     const t = this.config(id);
     return this.entries(id).filter(
@@ -148,7 +206,10 @@ export class Distribution {
   list() {
     return Object.keys(targetNames).map((id) => {
       const t = this.config(id),
-        jobs = this.currentJobs(id);
+        jobs = [
+          ...this.currentJobs(id),
+          ...(id === "all-api-hub" ? this.hubPending() : []),
+        ];
       const notApplicable =
         id === "all-api-hub"
           ? this.store
@@ -320,37 +381,25 @@ export class Distribution {
         subject: s.id,
         payload: this.notion.project(this.resources.detail(s.id)),
       }));
+    // Only the automatic check-in decision is the center's; the fields the
+    // extension owns are echoed when a job is claimed.
     if (id === "all-api-hub")
-      return this.store
-        .list("account")
-        .filter(
-          (a) =>
-            !a.mergedInto &&
-            sites.some((s) => s.id === a.siteId) &&
-            this.hubEligibility(a).state !== "not_applicable",
-        )
-        .map((a) => {
-          const s = sites.find((s) => s.id === a.siteId);
-          return {
-            subject: a.id,
-            payload: {
-              centerAccountId: a.id,
-              externalId:
-                a.sourceObservation?.source ===
-                (this.config(id).sourceId || "all-api-hub")
-                  ? a.sourceObservation.externalId
-                  : null,
-              siteId: s.id,
-              name: s.name,
-              url: s.url,
-              checkinUrl: s.checkinUrl || null,
-              automaticExecutionEnabled: a.checkinAccountId || a.checkinArchive?.active
-                ? false
-                : a.checkinEnabled ?? null,
-              disabled: a.enabled == null ? null : !a.enabled,
-            },
-          };
-        });
+      return this.hubAccounts().map((a) => ({
+        subject: a.id,
+        payload: {
+          centerAccountId: a.id,
+          externalId:
+            a.sourceObservation?.source ===
+            (this.config(id).sourceId || "all-api-hub")
+              ? a.sourceObservation.externalId
+              : null,
+          siteId: a.siteId,
+          ...this.hubDecision(
+            a,
+            this.store.get("targetLink", `${id}:${a.id}`),
+          ),
+        },
+      }));
     return channels
       .filter(
         (c) =>
@@ -437,8 +486,7 @@ export class Distribution {
           : null;
       const account =
         id === "all-api-hub" ? this.store.get("account", e.subject) : null;
-      const observed = account?.sourceObservation;
-      const initial = observed ? hubConfiguration(observed) : null;
+      const initial = account ? this.hubCurrent(account, null) : null;
       const notionPage =
         id === "notion" && !link?.remoteId
           ? this.notion.match(notionPages, e.payload)
@@ -451,7 +499,9 @@ export class Distribution {
       );
       rows.push({
         subject: e.subject,
-        name: e.payload.name || e.payload.title || "公益站书签",
+        name: account
+          ? account.sourceObservation?.siteName || account.name
+          : e.payload.name || e.payload.title || "公益站书签",
         action:
           id === "all-api-hub" && !e.payload.externalId
             ? "waiting_login"
@@ -559,7 +609,7 @@ export class Distribution {
     )) {
       const target = this.config(id);
       if (!target.enabled) continue;
-      if (id === "all-api-hub") this.observeHub(target);
+      if (id === "all-api-hub") this.observeHub();
       const entries = this.managedEntries(id);
       const subjects = new Set(entries.map((e) => e.subject));
       for (const j of this.store
@@ -596,6 +646,10 @@ export class Distribution {
             state: "superseded",
             supersededBy: latest.id,
           });
+        if (id === "all-api-hub") {
+          this.reconcileHub(e, revision, link, jobs);
+          continue;
+        }
         if (latest?.revision === revision) continue;
         for (const j of jobs.filter(
           (j) =>
@@ -617,6 +671,71 @@ export class Distribution {
       }
     }
   }
+  // Acts once per decision: a job only when the extension's current switch
+  // differs. Later changes made in the extension are left alone.
+  reconcileHub(e, revision, link, jobs) {
+    if (link?.decidedRevision === revision) return;
+    if (
+      jobs.some(
+        (j) =>
+          j.state === "running" && Date.parse(j.leaseUntil || 0) > Date.now(),
+      )
+    )
+      return;
+    const want = e.payload.automaticExecutionEnabled;
+    const current =
+      want == null
+        ? null
+        : e.payload.externalId &&
+          this.hubCurrent(this.store.get("account", e.subject), link);
+    if (want != null && !current) return;
+    const needed = want != null && current.automaticExecutionEnabled !== want;
+    for (const j of jobs.filter((j) =>
+      ["pending", "waiting", "failed", "conflict", "running"].includes(j.state),
+    ))
+      this.store.put("delivery", {
+        ...j,
+        state: "superseded",
+        supersededAt: now(),
+        reason:
+          want == null
+            ? "中心不再调整自动签到"
+            : needed
+              ? "中心决定已更新"
+              : hubInPlace,
+      });
+    if (needed)
+      this.store.put("delivery", {
+        id: randomUUID(),
+        target: "all-api-hub",
+        subject: e.subject,
+        revision,
+        payload: e.payload,
+        state: "pending",
+        createdAt: now(),
+        attempts: 0,
+      });
+    this.store.put("targetLink", {
+      ...(link || {
+        id: `all-api-hub:${e.subject}`,
+        target: "all-api-hub",
+        subject: e.subject,
+      }),
+      decidedRevision: revision,
+    });
+  }
+  hubStatus(e) {
+    if (!e.payload.externalId)
+      return { state: "waiting", reason: "需要在插件完成登录关联" };
+    const link = this.store.get("targetLink", `all-api-hub:${e.subject}`);
+    if (
+      e.payload.automaticExecutionEnabled != null &&
+      link?.decidedRevision !== digest(e.payload) &&
+      !this.hubCurrent(this.store.get("account", e.subject), link)
+    )
+      return { state: "waiting", reason: hubWaiting };
+    return null;
+  }
   diff(id) {
     const j = this.store.require("delivery", id),
       link = this.store.get("targetLink", `${j.target}:${j.subject}`),
@@ -630,26 +749,25 @@ export class Distribution {
             status: p.enabled ? 1 : 2,
           }
         : j.target === "all-api-hub"
-          ? {
-              name: p.name,
-              checkinUrl: p.checkinUrl,
-              automaticExecutionEnabled: p.automaticExecutionEnabled,
-              disabled: p.disabled,
-            }
+          ? p.automaticExecutionEnabled == null
+            ? {}
+            : { automaticExecutionEnabled: p.automaticExecutionEnabled }
           : Object.fromEntries(
               ["name", "baseUrl", "protocol", "models", "enabled", "order"].map(
                 (k) => [k, p[k]],
               ),
             );
-    const actual = publicValue(link?.conflictSnapshot || link?.snapshot || {});
+    const actual = publicValue(
+      (j.target === "all-api-hub" &&
+        this.hubCurrent(this.store.get("account", j.subject), link)) ||
+        link?.conflictSnapshot ||
+        link?.snapshot ||
+        {},
+    );
     return {
       id,
       changes: Object.keys(desired)
-        .filter(
-          (k) =>
-            (j.target !== "all-api-hub" || hubOwnsField(p, k)) &&
-            !same(desired[k], actual[k]),
-        )
+        .filter((k) => !same(desired[k], actual[k]))
         .map((field) => ({
           field,
           center: desired[field] ?? null,
@@ -685,8 +803,35 @@ export class Distribution {
             ...status,
           });
       }
+      result.push(...this.hubPending(query.subject));
     }
     return result.slice(0, query.subject ? undefined : 200);
+  }
+  // Waiting states that have no job: nothing is sent until the account is
+  // linked and its current values are known exactly.
+  hubPending(subject) {
+    if (!this.config("all-api-hub").enabled) return [];
+    const current = new Set(
+      this.currentJobs("all-api-hub").map((j) => j.subject),
+    );
+    return this.managedEntries("all-api-hub")
+      .filter(
+        (e) => (!subject || e.subject === subject) && !current.has(e.subject),
+      )
+      .flatMap((e) => {
+        const status = this.hubStatus(e);
+        return status
+          ? [
+              {
+                id: `waiting:${e.subject}`,
+                subject: e.subject,
+                target: "all-api-hub",
+                retryable: false,
+                ...status,
+              },
+            ]
+          : [];
+      });
   }
   channelStatus(id) {
     return this.currentJobs("newapi")
@@ -708,24 +853,24 @@ export class Distribution {
       this.observeConfiguration(link, owned(remote), now());
     }
   }
-  observeHub(target) {
-    for (const link of this.store
-      .list("targetLink")
-      .filter((l) => l.target === "all-api-hub")) {
-      const a = this.store.get("account", link.subject),
-        observed = a?.sourceObservation;
-      if (
-        !observed?.siteName ||
-        observed.source !== (target.sourceId || "all-api-hub") ||
-        observed.externalId !== link.remoteId ||
-        Date.parse(observed.observedAt) <= Date.parse(link.appliedAt || 0)
+  // A stop is held until its reason ends. Archiving requires automatic
+  // check-in to be on, so a recovered archive turns it back on.
+  observeHub() {
+    for (const a of this.hubAccounts()) {
+      const id = `all-api-hub:${a.id}`,
+        link = this.store.get("targetLink", id);
+      if (a.checkinArchive?.active && !link?.checkinHold)
+        this.store.put("targetLink", {
+          ...(link || { id, target: "all-api-hub", subject: a.id }),
+          checkinHold: { reason: "archived", at: now() },
+        });
+      else if (
+        link?.checkinHold &&
+        !a.checkinArchive?.active &&
+        !a.checkinAccountId &&
+        this.hubCurrent(a, link)?.automaticExecutionEnabled === true
       )
-        continue;
-      this.observeConfiguration(
-        link,
-        hubConfiguration(observed, link.snapshot),
-        observed.observedAt,
-      );
+        this.store.put("targetLink", { ...link, checkinHold: null });
     }
   }
   observeConfiguration(link, actual, observedAt) {
@@ -739,18 +884,7 @@ export class Distribution {
           j.state !== "superseded",
       )
       .at(-1);
-    const changed =
-      link.snapshot &&
-      (link.target === "all-api-hub"
-        ? Object.keys(actual).some(
-            (field) =>
-              hubOwnsField(job?.payload, field) &&
-              !same(
-                actual[field],
-                hubReported(link.snapshot, job?.payload, field),
-              ),
-          )
-        : digest(actual) !== digest(link.snapshot));
+    const changed = link.snapshot && digest(actual) !== digest(link.snapshot);
     const conflict = changed && job?.state === "applied";
     this.store.put("targetLink", {
       ...link,
@@ -836,29 +970,17 @@ export class Distribution {
             models: remote.models.split(",").filter(Boolean),
             enabled: remote.status === 1,
           });
-        } else if (j.target === "all-api-hub") {
-          const a = this.store.require("account", j.subject),
-            s = this.store.require("site", a.siteId);
-          this.resources.update("site", s.id, s.version, {
-            name: remote.name,
-            checkinUrl: remote.checkinUrl || null,
-          });
-          if (
-            remote.automaticExecutionEnabled != null ||
-            remote.disabled != null
-          )
-            this.resources.update("account", a.id, a.version, {
-              ...(remote.automaticExecutionEnabled != null
-                ? { checkinEnabled: remote.automaticExecutionEnabled }
-                : {}),
-              ...(remote.disabled != null ? { enabled: !remote.disabled } : {}),
-            });
-        } else throw new Problem(400, "镜像不支持反向采用配置");
+        } else if (j.target !== "all-api-hub")
+          throw new Problem(400, "镜像不支持反向采用配置");
         this.store.put("targetLink", {
           ...link,
           snapshot: remote,
           state: "applied",
           conflictSnapshot: null,
+          // The extension keeps its values; this decision is not pushed again.
+          ...(j.target === "all-api-hub"
+            ? { decidedRevision: j.revision }
+            : {}),
         });
         this.store.put("delivery", { ...j, state: "superseded" });
         this.reconcile(j.target);
@@ -940,6 +1062,8 @@ export class Distribution {
         subject: j.subject,
       };
     const state = result.state || "applied";
+    if (j.target === "all-api-hub")
+      return this.finishHub(j, link, state, result);
     if (j.target === "newapi" && state === "applied") {
       for (const o of this.store
         .list("offering")
@@ -985,6 +1109,60 @@ export class Distribution {
     });
     if (state === "applied") this.onApplied?.(j);
     return { acknowledged: true, id, state };
+  }
+  // The extension checks drift against its own last applied snapshot, so a
+  // change it made to the fields it owns arrives as a conflict.
+  finishHub(j, link, state, result) {
+    const at = now(),
+      snapshot = result.snapshot || null;
+    const next =
+      state !== "conflict"
+        ? {
+            state,
+            reason: result.reason || null,
+            appliedAt: state === "applied" ? at : null,
+            retryAt: state === "waiting" ? later(60) : null,
+          }
+        : !snapshot
+          ? {
+              state: "waiting",
+              reason: result.reason || "插件未回报当前账号资料",
+              retryAt: later(60),
+            }
+          : snapshot.automaticExecutionEnabled ===
+              j.payload.automaticExecutionEnabled
+            ? { state: "superseded", supersededAt: at, reason: hubInPlace }
+            : {
+                state: "pending",
+                force: true,
+                reason: "插件资料与上次回执不同，按插件当前值重新下发",
+                retryAt: j.force ? later(10) : null,
+              };
+    this.store.put("delivery", {
+      ...j,
+      ...next,
+      leaseUntil: null,
+      receipt: result,
+    });
+    this.store.put("targetLink", {
+      ...link,
+      remoteId: result.remoteId || link.remoteId,
+      ...(snapshot ? { reported: { at, snapshot } } : {}),
+      ...(state === "applied"
+        ? {
+            state,
+            snapshot,
+            appliedRevision: j.revision,
+            appliedAt: at,
+            checkinHold:
+              j.payload.automaticExecutionEnabled === false
+                ? { reason: j.payload.reason, at }
+                : null,
+          }
+        : {}),
+    });
+    if (state === "applied") this.onApplied?.(j);
+    return { acknowledged: true, id: j.id, state: next.state };
   }
   async applyNewApi(j) {
     this.gateway.writable();
@@ -1199,22 +1377,62 @@ export class Distribution {
     return {
       items: jobs
         .map((j) => {
+          const link = this.store.get("targetLink", `${target}:${j.subject}`);
+          let payload = publicValue({ ...j.payload, headerValues: undefined }),
+            expected = publicValue(link?.snapshot),
+            echo;
+          if (target === "all-api-hub") {
+            const current = this.hubCurrent(
+              this.store.get("account", j.subject),
+              link,
+            );
+            if (
+              !current ||
+              current.automaticExecutionEnabled ===
+                j.payload.automaticExecutionEnabled
+            ) {
+              this.store.put("delivery", {
+                ...j,
+                ...(current
+                  ? {
+                      state: "superseded",
+                      supersededAt: now(),
+                      reason: hubInPlace,
+                    }
+                  : {
+                      state: "waiting",
+                      retryAt: later(10),
+                      reason: hubWaiting,
+                    }),
+                leaseUntil: null,
+              });
+              return null;
+            }
+            // The extension writes name and check-in entry unconditionally, so
+            // they are sent exactly as it holds them now.
+            echo = {
+              name: current.name,
+              checkinUrl: current.checkinUrl,
+              disabled: current.disabled,
+            };
+            payload = { ...payload, ...echo };
+            expected = current;
+          }
           const lease = randomUUID();
           this.store.put("delivery", {
             ...j,
             state: "running",
             lease,
             leaseUntil: new Date(Date.now() + 120000).toISOString(),
+            ...(echo ? { echo } : {}),
           });
-          const link = this.store.get("targetLink", `${target}:${j.subject}`),
-            payload = publicValue({ ...j.payload, headerValues: undefined });
           return {
             id: j.id,
             lease,
             subject: j.subject,
             revision: j.revision,
             payload,
-            expected: publicValue(link?.snapshot),
+            expected,
             force: !!j.force,
             rootId: t.rootId || null,
           };
@@ -1236,7 +1454,14 @@ export class Distribution {
     )
       throw new Problem(403, "无权回执该任务");
     if (
-      ["applied", "waiting", "failed", "conflict"].includes(j.state) &&
+      [
+        "applied",
+        "waiting",
+        "failed",
+        "conflict",
+        "pending",
+        "superseded",
+      ].includes(j.state) &&
       j.lease === input.lease
     )
       return { acknowledged: true, id: j.id, state: j.state };

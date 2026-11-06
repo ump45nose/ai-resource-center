@@ -24,6 +24,12 @@
 - 设置中的 `removed.channels`／`removed.sites` 按 ID 保存被改字段的原值；`bookmarks` 保存每个 RP 渠道当时对书签计划的贡献（站点、地址、归档原因）及站点当时的标题、网址和识别地址，书签计划据此保持“酒馆”目录与 RP 归档条目不变。
 - 撤销：停止服务后执行 `node scripts/revert-rp-removal.mjs 数据目录`（预览）或加 `--apply`，按原值恢复渠道与站点，把记录移到 `migration:rp-out-of-center-v1:reverted:<时间>`，然后部署仍管理 RP 的旧版本；继续运行本版本会在下次启动时再次移出。
 
+## All API Hub 账号字段归属
+
+账号名称（`site_name`）、站点地址、签到入口（`customCheckIn.url`）和账号启停归插件。中心的站点名称、`checkinUrl`、账号 `enabled` 与 `checkinEnabled` 只在中心、Notion 和书签中使用，不回写插件。中心只决定自动签到开关：签到归档或委托独立签到账号时停止，解除后恢复。
+
+同步记录（`targetLink`，`all-api-hub:<账号 ID>`）新增：`reported={at,snapshot}` 为最近一次插件回执的快照；`checkinHold={reason,at}` 表示中心的停止尚待恢复；`decidedRevision` 为已经处理过的决定摘要，同一决定不再重复下发。任务记录的 `payload` 只含账号标识与决定（`automaticExecutionEnabled`、`reason`），领取时实际回显给插件的名称、签到入口和停用状态存于 `echo`。升级时 `migration:hub-checkin-writeback-v1` 把旧版遗留的冲突与未完成任务按插件当前值清除，并记录清除前的冲突快照。
+
 ## 哪些内容不能被同步覆盖
 
 - 人工启停、限制标签、应用绑定、排序、备注、评价、权益规则与归档决定。

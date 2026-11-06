@@ -10,10 +10,11 @@ type Job = {
   state: string;
   reason?: string;
   appliedAt?: string;
+  retryable?: boolean;
 };
 const targetLabels: Record<string, string> = {
   newapi: "New API · 渠道配置",
-  "all-api-hub": "All API Hub · 账号与签到",
+  "all-api-hub": "All API Hub · 自动签到开关",
   notion: "Notion",
   "chrome-bookmarks": "Chrome 书签",
 };
@@ -99,7 +100,8 @@ export default function SyncStatus({ subject }: { subject: string }) {
               </Button>
             </div>
           ) : (
-            ["failed", "waiting"].includes(j.state) && (
+            ["failed", "waiting"].includes(j.state) &&
+            j.retryable !== false && (
               <Button variant="ghost" onClick={() => void act(j, "retry")}>
                 重试
               </Button>

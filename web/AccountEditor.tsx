@@ -5,6 +5,39 @@ import { Button } from "./components";
 import { amount, lines, type Account } from "./data";
 import SyncStatus from "./SyncStatus";
 
+type HubIntegration = {
+  state: string;
+  extension?: {
+    name: string;
+    checkinUrl: string | null;
+    automaticExecutionEnabled: boolean;
+    disabled: boolean;
+  } | null;
+  automaticCheckin?: {
+    automaticExecutionEnabled: boolean | null;
+    reason: "archived" | "delegated" | "restored" | null;
+  };
+};
+const writeBack = {
+  archived: "签到已归档，中心要求插件停止自动签到",
+  delegated: "由独立签到账号执行，中心要求插件停止本账号自动签到",
+  restored: "归档或代签已解除，中心要求插件恢复自动签到",
+};
+
+function HubValues({ hub }: { hub: HubIntegration }) {
+  const values = hub.extension;
+  const reason = hub.automaticCheckin?.reason;
+  return (
+    <p className="rule-line">
+      {values
+        ? `插件中：${values.name} · 签到入口 ${values.checkinUrl || "插件默认"} · 自动签到${values.automaticExecutionEnabled ? "开启" : "关闭"} · ${values.disabled ? "已停用" : "已启用"}`
+        : "插件中：等待插件回报当前资料"}
+      。名称、地址、签到入口和启停以插件为准；
+      {reason ? writeBack[reason] : "中心不回写，只在归档或代签时停止或恢复自动签到"}
+    </p>
+  );
+}
+
 export default function AccountEditor({
   account: a,
   conflict,
@@ -21,6 +54,8 @@ export default function AccountEditor({
   const [open, setOpen] = useState(conflict),
     [error, setError] = useState(conflict ? conflictText : ""),
     [busy, setBusy] = useState(false);
+  const hub = (a as Account & { integration?: HubIntegration }).integration;
+  const linked = hub?.state === "linked";
   async function save(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
@@ -81,6 +116,7 @@ export default function AccountEditor({
         <span>{amount(a.balance, a.unit)}</span>
         <span className="text-link">编辑权益</span>
       </button>
+      {hub?.state === "linked" && <HubValues hub={hub} />}
       {open && (
         <form className="form-stack" onSubmit={save}>
           <div className="form-grid">
@@ -113,20 +149,20 @@ export default function AccountEditor({
               </select>
             </label>
             <label>
-              插件账号
+              中心启停{linked && "（不写回插件）"}
               <select
                 name="pluginState"
                 defaultValue={
                   a.enabled == null ? "inherit" : a.enabled ? "yes" : "no"
                 }
               >
-                <option value="inherit">保留插件启停</option>
+                <option value="inherit">跟随插件</option>
                 <option value="yes">启用</option>
                 <option value="no">停用</option>
               </select>
             </label>
             <label>
-              自动签到
+              签到需求{linked && "（不写回插件）"}
               <select
                 name="checkin"
                 defaultValue={
@@ -137,9 +173,9 @@ export default function AccountEditor({
                       : "no"
                 }
               >
-                <option value="inherit">保留插件设置</option>
-                <option value="yes">启用</option>
-                <option value="no">停用</option>
+                <option value="inherit">跟随插件</option>
+                <option value="yes">需要签到</option>
+                <option value="no">无需签到</option>
               </select>
             </label>
             <label>

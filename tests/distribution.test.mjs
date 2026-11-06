@@ -1,8 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createApp } from "../server/app.mjs";
 import { issueToken } from "../server/auth.mjs";
-import { Problem } from "../server/errors.mjs";
-import { hash } from "../server/store.mjs";
+import { hash, Store } from "../server/store.mjs";
 import { canonical, digest, same } from "../server/canonical.mjs";
 import {
   newApiType,
@@ -94,23 +97,82 @@ const bookmarkToken = (f) =>
     sourceId: "all-api-hub",
   });
 
-function hubAccount(f) {
-  return f.store.put("account", {
-    ...f.store.require("account", f.account.id),
-    enabled: true,
-    checkinEnabled: true,
-    sourceObservation: {
-      source: "all-api-hub",
-      externalId: "hub-1",
-      name: "Login",
-      siteName: "Fixture",
-      siteUrl: "https://upstream.test",
-      enabled: true,
-      checkin: { enabled: true },
-      present: true,
-      observedAt: new Date(Date.now() - 60000).toISOString(),
-    },
+const pause = () => new Promise((resolve) => setTimeout(resolve, 5));
+
+// The fixture account linked to native All API Hub account hub-1. The center
+// keeps its own site name and check-in entry, which must never be pushed.
+async function hubSetup(f) {
+  const site = f.store.require("site", f.site.id);
+  f.store.put("site", {
+    ...site,
+    checkinUrl: "https://center.test/checkin",
+    version: site.version + 1,
   });
+  f.store.ref("all-api-hub", "account", "hub-1", f.account.id);
+  const ingest = issueToken(f.store, "ingest", { sourceId: "all-api-hub" });
+  const state = {
+    siteName: "Hub Fixture",
+    customUrl: "https://upstream.test/custom-checkin",
+    enabled: true,
+    checkin: true,
+  };
+  let n = 0;
+  const inventory = async (changes = {}) => {
+    Object.assign(state, changes);
+    await pause();
+    const at = new Date().toISOString();
+    const checkin = { enabled: state.checkin };
+    if (state.customUrl !== undefined) checkin.customUrl = state.customUrl;
+    const r = await f.call(
+      "POST",
+      "/api/v2/ingest/inventory",
+      {
+        eventId: `inventory-${++n}`,
+        occurredAt: at,
+        deviceId: "device",
+        accounts: [
+          {
+            id: "hub-1",
+            name: "Login",
+            site: { name: state.siteName, url: "https://upstream.test" },
+            observedAt: at,
+            balance: null,
+            unit: "credits",
+            enabled: state.enabled,
+            siteType: "new-api",
+            checkin,
+          },
+        ],
+      },
+      ingest,
+    );
+    assert.equal(r.statusCode, 200, r.body);
+  };
+  await inventory();
+  const token = issueToken(f.store, "connector", {
+    target: "all-api-hub",
+    sourceId: "all-api-hub",
+  });
+  const d = f.app.services.distribution;
+  const jobs = () =>
+    f.store.list("delivery").filter((j) => j.target === "all-api-hub");
+  const account = (changes) => {
+    const a = f.store.require("account", f.account.id);
+    f.store.put("account", { ...a, ...changes });
+    d.reconcile("all-api-hub");
+  };
+  const apply = async (job, snapshot, state = "applied") => {
+    await pause();
+    return receipt(f, token, {
+      id: job.id,
+      lease: job.lease,
+      state,
+      remoteId: "hub-1",
+      snapshot,
+    });
+  };
+  const link = () => f.store.get("targetLink", `all-api-hub:${f.account.id}`);
+  return { d, token, inventory, jobs, account, apply, link, state };
 }
 
 test("shared canonical JSON reproduces every replaced implementation", async (t) => {
@@ -351,124 +413,261 @@ test("connector receipts never persist plaintext keys or header values", async (
   );
 });
 
-test("All API Hub observations compare reported managed fields only", async (t) => {
+test("All API Hub receives only the stop and resume of automatic check-in", async (t) => {
   const f = await fixture(t);
-  const d = f.app.services.distribution;
-  hubAccount(f);
+  newApiSource(f);
+  const hub = await hubSetup(f);
+  const { d } = hub;
+  const revisions = (target) =>
+    Object.fromEntries(
+      d.entries(target).map((e) => [e.subject, digest(e.payload)]),
+    );
+  const newApi = revisions("newapi");
   await adopt(f, "all-api-hub");
-  const token = issueToken(f.store, "connector", {
-    target: "all-api-hub",
-    sourceId: "all-api-hub",
+  assert.deepEqual(hub.jobs(), []);
+  assert.deepEqual(await claim(f, hub.token), []);
+
+  const site = f.store.require("site", f.site.id);
+  f.resources.update("site", site.id, site.version, {
+    name: "Center name",
+    checkinUrl: "https://center.test/other",
   });
-  const [job] = await claim(f, token);
-  assert.equal(job.payload.automaticExecutionEnabled, true);
-  assert.equal(job.payload.disabled, false);
-  // The plugin applied every field but reports only the ones it stores natively.
-  await receipt(f, token, {
-    id: job.id,
-    lease: job.lease,
-    state: "applied",
-    remoteId: "hub-1",
-    snapshot: { name: "Fixture", checkinUrl: null },
+  const notion = revisions("notion");
+  await hub.inventory({
+    siteName: "Renamed in hub",
+    customUrl: "https://upstream.test/new",
+    enabled: false,
   });
-  const linkId = `all-api-hub:${f.account.id}`;
-  let seconds = 0;
-  const observe = (changes = {}) => {
-    const a = f.store.require("account", f.account.id);
-    f.store.put("account", {
-      ...a,
-      sourceObservation: {
-        ...a.sourceObservation,
-        ...changes,
-        observedAt: new Date(Date.now() + ++seconds * 1000).toISOString(),
-      },
-    });
-    d.reconcile("all-api-hub");
-    return [
-      f.store.require("targetLink", linkId).state,
-      f.store.require("delivery", job.id).state,
-    ];
+  await hub.inventory({ siteName: "Renamed again" });
+  d.reconcile("all-api-hub");
+  assert.deepEqual(hub.jobs(), [], "names, entries and enabled state stay");
+  assert.deepEqual(await claim(f, hub.token), []);
+
+  hub.account({
+    checkinArchive: { active: true, reason: "invalid", at: new Date().toISOString() },
+  });
+  let [job] = await claim(f, hub.token);
+  const echoed = {
+    name: "Renamed again",
+    checkinUrl: "https://upstream.test/new",
+    disabled: true,
   };
-  assert.deepEqual(observe(), ["applied", "applied"]);
-  f.store.put("targetLink", {
-    ...f.store.require("targetLink", linkId),
-    snapshot: {
-      name: "Fixture",
-      checkinUrl: null,
-      automaticExecutionEnabled: null,
-      disabled: null,
+  assert.deepEqual(job.payload, {
+    centerAccountId: f.account.id,
+    externalId: "hub-1",
+    siteId: f.site.id,
+    automaticExecutionEnabled: false,
+    reason: "archived",
+    ...echoed,
+  });
+  assert.deepEqual(job.expected, {
+    name: echoed.name,
+    checkinUrl: echoed.checkinUrl,
+    automaticExecutionEnabled: true,
+    disabled: true,
+  });
+  assert.equal(job.force, false);
+  assert.ok(!JSON.stringify(job).includes("center.test"));
+  await hub.apply(job, { ...job.expected, automaticExecutionEnabled: false });
+  assert.equal(f.store.require("delivery", job.id).state, "applied");
+  assert.equal(hub.link().checkinHold.reason, "archived");
+
+  const count = hub.jobs().length;
+  for (const siteName of ["Renamed again", "Third name", "Third name"])
+    await hub.inventory({ siteName, checkin: false });
+  d.reconcile("all-api-hub");
+  await claim(f, hub.token);
+  assert.equal(hub.jobs().length, count, "no job from repeated inventories");
+  assert.equal(f.store.require("delivery", job.id).state, "applied");
+  assert.notEqual(hub.link().state, "conflict");
+  assert.ok(!hub.jobs().some((j) => j.state === "conflict"));
+
+  hub.account({
+    checkinArchive: {
+      active: false,
+      reason: "invalid",
+      recoveredAt: new Date().toISOString(),
     },
   });
-  assert.deepEqual(observe(), ["applied", "applied"]);
-  assert.deepEqual(observe({ checkin: { enabled: false } }), [
-    "conflict",
-    "conflict",
-  ]);
+  [job] = await claim(f, hub.token);
+  assert.equal(job.payload.automaticExecutionEnabled, true);
+  assert.equal(job.payload.reason, "restored");
+  assert.equal(job.payload.name, "Third name");
+  await hub.apply(job, { ...job.expected, automaticExecutionEnabled: true });
+  assert.equal(hub.link().checkinHold, null);
+  const settled = hub.jobs().length;
+  await hub.inventory({ checkin: true });
+  await hub.inventory({ checkin: false });
+  d.reconcile("all-api-hub");
+  assert.deepEqual(await claim(f, hub.token), []);
+  assert.equal(hub.jobs().length, settled, "the extension's later choice stands");
+
+  assert.deepEqual(revisions("newapi"), newApi);
+  assert.deepEqual(revisions("notion"), notion);
+  const view = (await f.call("GET", `/api/v2/sites/${f.site.id}`)).json()
+    .accounts[0].integration;
+  assert.deepEqual(view.extension, {
+    name: "Third name",
+    checkinUrl: "https://upstream.test/new",
+    automaticExecutionEnabled: false,
+    disabled: true,
+  });
+  assert.deepEqual(view.automaticCheckin, {
+    automaticExecutionEnabled: null,
+    reason: null,
+  });
+});
+
+test("extension-side drift is resent with its current values, never raised as a conflict", async (t) => {
+  const f = await fixture(t);
+  const hub = await hubSetup(f);
+  const { d } = hub;
+  await adopt(f, "all-api-hub");
+  const executor = f.store.require("account", f.account.id).sourceObservation;
+  f.store.put("account", {
+    id: "executor",
+    siteId: f.site.id,
+    name: "Executor",
+    role: "checkin",
+    sourceObservation: { ...executor, externalId: "hub-executor" },
+  });
+  hub.account({ checkinAccountId: "executor" });
+  let [job] = await claim(f, hub.token);
+  assert.equal(job.payload.reason, "delegated");
+  // The extension's own baseline predates a rename made in the extension.
+  const renamed = { ...job.expected, name: "Renamed in hub" };
+  assert.equal((await hub.apply(job, renamed, "conflict")).state, "pending");
+  const resent = f.store.require("delivery", job.id);
+  assert.equal(resent.state, "pending");
+  assert.equal(resent.force, true);
+  assert.notEqual(hub.link().state, "conflict");
+  assert.ok(!d.jobs({ target: "all-api-hub" }).some((j) => j.state === "conflict"));
+  [job] = await claim(f, hub.token);
+  assert.equal(job.force, true);
+  assert.equal(job.payload.name, "Renamed in hub");
+  assert.equal(job.payload.automaticExecutionEnabled, false);
+  await hub.apply(job, { ...renamed, automaticExecutionEnabled: false });
+  assert.equal(hub.link().checkinHold.reason, "delegated");
+
+  hub.account({ checkinAccountId: null });
+  [job] = await claim(f, hub.token);
+  assert.equal(job.payload.reason, "restored");
+  // Already switched back on in the extension: the resume is not needed.
+  await hub.apply(job, { ...job.expected, automaticExecutionEnabled: true }, "conflict");
+  assert.equal(f.store.require("delivery", job.id).state, "superseded");
+  hub.account({});
+  assert.equal(hub.link().checkinHold, null);
+  assert.deepEqual(await claim(f, hub.token), []);
+
+  // An older extension version reports no custom entry: wait until it is exact.
+  await hub.inventory({ customUrl: undefined, checkin: true });
+  hub.account({
+    checkinArchive: { active: true, reason: "invalid", at: new Date().toISOString() },
+  });
+  assert.deepEqual(await claim(f, hub.token), []);
+  const [waiting] = d.jobs({ target: "all-api-hub", subject: f.account.id });
+  assert.equal(waiting.state, "waiting");
+  assert.equal(waiting.retryable, false);
+  assert.match(waiting.reason, /签到入口/);
   assert.equal(
-    f.store.require("targetLink", linkId).conflictSnapshot
-      .automaticExecutionEnabled,
-    false,
+    d.list().find((x) => x.id === "all-api-hub").counts.waiting,
+    1,
+  );
+  await hub.inventory({ customUrl: null });
+  [job] = await claim(f, hub.token);
+  assert.equal(job.payload.automaticExecutionEnabled, false);
+  assert.equal(job.payload.checkinUrl, null);
+
+  // Removed from the extension: an older receipt is not taken as current.
+  const removed = f.store.require("account", f.account.id);
+  f.store.put("account", {
+    ...removed,
+    sourceObservation: { ...removed.sourceObservation, present: false },
+  });
+  assert.equal(
+    d.hubCurrent(f.store.require("account", f.account.id), hub.link()),
+    null,
   );
 });
 
-test("a failed adoption leaves the hub link, job and center data unchanged", async (t) => {
-  const f = await fixture(t);
-  const d = f.app.services.distribution;
-  hubAccount(f);
-  await adopt(f, "all-api-hub");
-  await adopt(f, "chrome-bookmarks");
-  const token = issueToken(f.store, "connector", {
-    target: "all-api-hub",
-    sourceId: "all-api-hub",
+test("old All API Hub conflicts are cleared at startup in favor of the extension", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "arc-hub-"));
+  let app;
+  t.after(async () => {
+    await app?.close();
+    rmSync(dir, { recursive: true, force: true });
   });
-  const [job] = await claim(f, token);
-  await receipt(f, token, {
-    id: job.id,
-    lease: job.lease,
-    state: "applied",
-    remoteId: "hub-1",
-    snapshot: {
-      name: "Fixture",
-      checkinUrl: null,
-      automaticExecutionEnabled: true,
-      disabled: false,
-    },
+  const store = new Store(dir);
+  const at = new Date().toISOString();
+  const site = store.put("site", {
+    name: "Center",
+    url: "https://upstream.test",
+    sources: ["all-api-hub"],
   });
-  const a = f.store.require("account", f.account.id);
-  f.store.put("account", {
-    ...a,
+  const account = store.put("account", {
+    siteId: site.id,
+    name: "Login",
     sourceObservation: {
-      ...a.sourceObservation,
-      siteName: "Renamed",
-      checkin: { enabled: false },
-      observedAt: new Date(Date.now() + 1000).toISOString(),
+      source: "all-api-hub",
+      externalId: "hub-1",
+      siteName: "Hub name",
+      enabled: true,
+      checkin: { enabled: true, customUrl: null },
+      present: true,
+      observedAt: at,
     },
   });
-  d.reconcile("all-api-hub");
-  const linkId = `all-api-hub:${f.account.id}`;
-  const link = f.store.require("targetLink", linkId),
-    delivery = f.store.require("delivery", job.id);
-  assert.equal(link.state, "conflict");
-  assert.equal(delivery.state, "conflict");
-  const update = f.resources.update;
-  f.resources.update = function (kind, ...rest) {
-    if (kind === "account")
-      throw new Problem(
-        409,
-        "资料已被修改，请读取最新版本",
-        undefined,
-        "version_conflict",
-      );
-    return update.call(this, kind, ...rest);
+  store.setting("target:all-api-hub", {
+    enabled: true,
+    adoptedAt: at,
+    version: 2,
+    managedSubjects: [account.id],
+    baselineSubjects: [account.id],
+  });
+  const snapshot = {
+    name: "Center",
+    checkinUrl: null,
+    automaticExecutionEnabled: true,
+    disabled: false,
   };
-  await assert.rejects(d.resolve(job.id, "target"), { statusCode: 409 });
-  assert.equal(f.store.require("site", f.site.id).name, "Fixture");
-  assert.deepEqual(f.store.require("targetLink", linkId), link);
-  assert.deepEqual(f.store.require("delivery", job.id), delivery);
-  f.resources.update = update;
-  assert.deepEqual(await d.resolve(job.id, "target"), { resolved: true });
-  assert.equal(f.store.require("site", f.site.id).name, "Renamed");
-  assert.equal(f.store.require("account", f.account.id).checkinEnabled, false);
-  assert.equal(f.store.require("targetLink", linkId).state, "applied");
-  assert.equal(f.store.require("delivery", job.id).state, "superseded");
+  const conflict = store.put("delivery", {
+    target: "all-api-hub",
+    subject: account.id,
+    revision: "old",
+    payload: { centerAccountId: account.id, externalId: "hub-1", siteId: site.id, url: site.url, ...snapshot },
+    state: "conflict",
+    createdAt: at,
+    attempts: 0,
+  });
+  store.put("targetLink", {
+    id: `all-api-hub:${account.id}`,
+    target: "all-api-hub",
+    subject: account.id,
+    state: "conflict",
+    remoteId: "hub-1",
+    snapshot,
+    appliedAt: at,
+    conflictSnapshot: { ...snapshot, name: "Hub name" },
+  });
+  store.close();
+  app = await createApp({ dir });
+  const s = app.services.store;
+  const link = s.require("targetLink", `all-api-hub:${account.id}`);
+  assert.equal(link.state, "applied");
+  assert.equal(link.conflictSnapshot, null);
+  const cleared = s.require("delivery", conflict.id);
+  assert.equal(cleared.state, "superseded");
+  assert.match(cleared.reason, /以插件为准/);
+  assert.equal(s.require("site", site.id).name, "Center");
+  const d = app.services.distribution;
+  d.reconcile("all-api-hub");
+  assert.deepEqual(
+    s.list("delivery").filter((j) => j.state !== "superseded"),
+    [],
+  );
+  assert.ok(!d.jobs({ target: "all-api-hub" }).some((j) => j.state === "conflict"));
+  assert.equal(
+    s.setting("migration:hub-checkin-writeback-v1").conflicts[0].id,
+    link.id,
+  );
 });

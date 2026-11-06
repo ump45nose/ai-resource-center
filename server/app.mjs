@@ -4,6 +4,7 @@ import {
   migrateChannels,
   migrateUsage,
   migrateRpRemoval,
+  migrateHubWriteBack,
 } from "./migrations.mjs";
 import { migrateHubKeys } from "./hub-keys.mjs";
 import { registerWeb } from "./web.mjs";
@@ -55,6 +56,7 @@ export async function createApp({
   migrateUsage(store);
   migrateHubKeys(store);
   migrateRpRemoval(store);
+  migrateHubWriteBack(store);
   const existingSources = store.setting("sources") || [];
   if (!existingSources.some((s) => s.id === "all-api-hub"))
     store.setting("sources", [

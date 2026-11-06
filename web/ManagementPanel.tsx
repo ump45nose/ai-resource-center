@@ -20,6 +20,11 @@ export default function ManagementPanel({
   const [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
     [conflict, setConflict] = useState("");
+  const hubLinked = site.accounts.some(
+    (a) =>
+      (a as { integration?: { state: string } }).integration?.state ===
+      "linked",
+  );
   async function saveSite(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
@@ -72,6 +77,12 @@ export default function ManagementPanel({
               placeholder="与网站分离时填写独立入口"
             />
           </label>
+          {hubLinked && (
+            <p className="muted">
+              这里的名称、网址和签到入口只用于中心、Notion 和书签；All API Hub
+              账号以插件中的设置为准，不会被改写。
+            </p>
+          )}
           <details>
             <summary>别名与备注</summary>
             <label>
