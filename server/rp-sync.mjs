@@ -1,14 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { Problem } from "./errors.mjs";
+import { Problem, errorMessage } from "./errors.mjs";
 import { canonicalApi } from "./domain.mjs";
 import { archiveOf, archiveLabels, isRemoved } from "./channel-rules.mjs";
 import { hash } from "./store.mjs";
+import { canonical, digest, same } from "./canonical.mjs";
+import { withoutSecrets } from "./redaction.mjs";
 import { recordCall } from "./ingest.mjs";
 
 const id = z.string().min(1).max(160);
 const version = z.number().int().positive();
-export const rpSnapshotSchema = z
+const rpSnapshotSchema = z
   .object({
     name: z.string().min(1).max(300),
     baseUrl: z.url(),
@@ -154,15 +156,6 @@ export const rpCallSchema = z
       .max(100),
   })
   .strict();
-const stable = (x) =>
-  JSON.stringify(x, (_k, v) =>
-    v && typeof v === "object" && !Array.isArray(v)
-      ? Object.fromEntries(
-          Object.entries(v).sort(([a], [b]) => a.localeCompare(b)),
-        )
-      : v,
-  );
-const same = (a, b) => stable(a) === stable(b);
 const now = () => new Date().toISOString();
 
 /** RP bindings have their own configuration version. Observations never advance it. */
@@ -216,7 +209,7 @@ export class RpSync {
   }
   rememberConfig(b) {
     const s = this.desired(b),
-      id = hash(stable([b.id, s.baseUrl, s.protocol, s.credentialFingerprint]));
+      id = digest([b.id, s.baseUrl, s.protocol, s.credentialFingerprint]);
     if (!this.store.get("rpConfig", id))
       this.store.put("rpConfig", {
         id,
@@ -322,7 +315,7 @@ export class RpSync {
     };
   }
   once(auth, eventId, fn) {
-    const scope = stable(this.identity(auth));
+    const scope = canonical(this.identity(auth));
     const old = this.store.db
       .prepare("SELECT data FROM receipts WHERE source=? AND event_id=?")
       .get(scope, eventId);
@@ -336,7 +329,7 @@ export class RpSync {
     });
   }
   mapped(identity, nativeId) {
-    const key = stable([identity.instanceId, identity.userId, nativeId]);
+    const key = canonical([identity.instanceId, identity.userId, nativeId]);
     const ref = this.store.ref(identity.sourceId, "rpConnection", key);
     if (ref) return this.store.require("rpConnection", ref);
     return null;
@@ -379,14 +372,12 @@ export class RpSync {
       const identity = this.identity(auth),
         items = [];
       for (const p of input.profiles) {
-        const unresolvedId = hash(
-          stable([
-            identity.sourceId,
-            identity.instanceId,
-            identity.userId,
-            p.nativeConnectionId,
-          ]),
-        );
+        const unresolvedId = digest([
+          identity.sourceId,
+          identity.instanceId,
+          identity.userId,
+          p.nativeConnectionId,
+        ]);
         if (!p.snapshot)
           this.store.put("rpUnresolved", {
             id: unresolvedId,
@@ -453,7 +444,7 @@ export class RpSync {
           this.store.ref(
             identity.sourceId,
             "rpConnection",
-            stable([
+            canonical([
               identity.instanceId,
               identity.userId,
               p.nativeConnectionId,
@@ -605,7 +596,12 @@ export class RpSync {
     const b = this.store.require("rpConnection", bindingId),
       c = this.store.require("channel", b.channelId);
     if (b.version !== p.version || c.version !== p.channelVersion)
-      throw new Problem(409, "配置版本已变化，请刷新");
+      throw new Problem(
+        409,
+        "配置版本已变化，请刷新",
+        { currentVersion: b.version, channelVersion: c.version },
+        "version_conflict",
+      );
     return this.store.transaction(() => {
       this.rememberConfig(b);
       const local = p.resolve === "local" ? b.conflict?.local : null;
@@ -645,7 +641,12 @@ export class RpSync {
     const b = this.binding(auth, input.nativeConnectionId),
       c = this.store.require("channel", b.channelId);
     if (c.version !== input.channelVersion)
-      throw new Problem(409, "归档前渠道已更新，请刷新");
+      throw new Problem(
+        409,
+        "归档前渠道已更新，请刷新",
+        { channelVersion: c.version },
+        "version_conflict",
+      );
     if (isRemoved(c)) throw new Problem(409, "永久移除的连接保持移除");
     this.resources.lifecycle(
       c.id,
@@ -659,16 +660,14 @@ export class RpSync {
   }
   revision(b) {
     const c = this.store.require("channel", b.channelId);
-    return hash(
-      stable([
-        c.version,
-        b.version,
-        this.desired(b),
-        archiveOf(c),
-        isRemoved(c),
-        c.enabled,
-      ]),
-    );
+    return digest([
+      c.version,
+      b.version,
+      this.desired(b),
+      archiveOf(c),
+      isRemoved(c),
+      c.enabled,
+    ]);
   }
   claim(auth) {
     if (auth.role !== "connector" || auth.scope.target !== "sillytavern")
@@ -733,9 +732,11 @@ export class RpSync {
       throw new Problem(409, "任务租约已变化，请重新领取");
     if (j.state !== "running")
       return { acknowledged: true, id: j.id, state: j.state };
+    const snapshot = withoutSecrets(p.snapshot),
+      reason = p.reason && errorMessage(p.reason);
     if (
       p.state === "applied" &&
-      (j.revision !== this.revision(b) || !same(p.snapshot, this.desired(b)))
+      (j.revision !== this.revision(b) || !same(snapshot, this.desired(b)))
     )
       throw new Problem(409, "回读配置与任务版本不同");
     this.store.put("rpDelivery", {
@@ -743,7 +744,7 @@ export class RpSync {
       state: p.state,
       leaseUntil: null,
       retryAt: new Date(Date.now() + 30000).toISOString(),
-      reason: p.reason,
+      reason,
     });
     this.store.put("rpConnection", {
       ...b,
@@ -751,8 +752,8 @@ export class RpSync {
       forceApply: false,
       ...(p.state === "applied"
         ? {
-            lastApplied: p.snapshot,
-            nativeSnapshot: p.snapshot,
+            lastApplied: snapshot,
+            nativeSnapshot: snapshot,
             lastAppliedAt: now(),
             appliedRevision: j.revision,
           }
@@ -760,9 +761,9 @@ export class RpSync {
       ...(p.state === "conflict"
         ? {
             conflict: {
-              local: p.snapshot,
+              local: snapshot,
               center: this.desired(b),
-              reason: p.reason || "酒馆配置已改变",
+              reason: reason || "酒馆配置已改变",
             },
           }
         : {}),

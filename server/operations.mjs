@@ -1,14 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Problem, errorMessage } from "./errors.mjs";
-
-const canonical = (value) =>
-  JSON.stringify(value, function (_key, item) {
-    return item && typeof item === "object" && !Array.isArray(item)
-      ? Object.fromEntries(
-          Object.entries(item).sort(([a], [b]) => a.localeCompare(b)),
-        )
-      : item;
-  });
+import { canonical } from "./canonical.mjs";
 
 export class Operations {
   constructor(store) {

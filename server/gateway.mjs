@@ -6,6 +6,13 @@ import {
   archiveOf,
 } from "./channel-rules.mjs";
 import { verified, autoManaged } from "./maintenance-policy.mjs";
+import {
+  newApiType,
+  channelType,
+  headerOverride,
+  passthroughSetting,
+  findByTag,
+} from "./newapi-channel.mjs";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { canonicalApi } from "./domain.mjs";
@@ -97,17 +104,14 @@ export class Gateway {
       const update = {
         ...config,
         id: remote.id,
+        type: channelType(c.protocol, remote),
         key: this.store.reveal(c.credentialId),
         base_url: canonicalApi(c.baseUrl, c.protocol),
         models: offering.evaluationModelId,
         model_mapping: JSON.stringify({
           [offering.evaluationModelId]: offering.modelId,
         }),
-        header_override: JSON.stringify(
-          Object.fromEntries(
-            channelHeaders(this.store, c).map((h) => [h.name, h.value]),
-          ),
-        ),
+        header_override: headerOverride(channelHeaders(this.store, c)),
       };
       await this.sources.configureChannel(source, update);
       const after = await this.sources.request(
@@ -131,9 +135,7 @@ export class Gateway {
       gatewayTag: tag,
       evaluationModelId: alias,
     });
-    let remote = (await this.sources.pages(source, "/api/channel/")).find(
-      (r) => r.tag === tag,
-    );
+    let remote = await findByTag(this.sources, source, tag);
     if (!remote) {
       if (offering.gatewayPending)
         throw new Problem(409, "上次渠道创建结果未确认，请核对后再继续");
@@ -144,7 +146,7 @@ export class Gateway {
       await this.sources.request(source, "/api/channel/", "POST", {
         mode: "single",
         channel: {
-          type: c.protocol === "Anthropic" ? 14 : 1,
+          type: newApiType(c.protocol),
           name: `${c.name} · ${offering.modelId}`,
           tag,
           base_url: canonicalApi(c.baseUrl, c.protocol),
@@ -156,19 +158,11 @@ export class Gateway {
           priority: 0,
           weight: 100,
           auto_ban: 0,
-          header_override: JSON.stringify(
-            Object.fromEntries(
-              channelHeaders(this.store, c).map((h) => [h.name, h.value]),
-            ),
-          ),
-          ...(c.nativePassthrough
-            ? { setting: JSON.stringify({ pass_through_body_enabled: true }) }
-            : {}),
+          header_override: headerOverride(channelHeaders(this.store, c)),
+          ...passthroughSetting(c),
         },
       });
-      remote = (await this.sources.pages(source, "/api/channel/")).find(
-        (r) => r.tag === tag,
-      );
+      remote = await findByTag(this.sources, source, tag);
     }
     if (!remote) throw new Problem(502, "New API 渠道创建尚未回读确认");
     return this.store.put("offering", {

@@ -1,6 +1,13 @@
 import { routableModels } from "./channel-health.mjs";
 import { randomUUID } from "node:crypto";
-import { hash } from "./store.mjs";
+import { digest, same } from "./canonical.mjs";
+import {
+  channelType,
+  headerOverride,
+  passthroughSetting,
+  findByTag,
+} from "./newapi-channel.mjs";
+import { withoutSecrets } from "./redaction.mjs";
 import { canonicalApi } from "./domain.mjs";
 import { Problem, publicValue, errorMessage } from "./errors.mjs";
 import {
@@ -20,26 +27,26 @@ import {
 import { bookmarkPlan } from "./bookmarks.mjs";
 import { NotionMirror } from "./notion-mirror.mjs";
 
-export const targetNames = {
+const targetNames = {
   newapi: "New API",
   "all-api-hub": "All API Hub",
   sillytavern: "酒馆插件",
   notion: "Notion",
   "chrome-bookmarks": "Chrome 书签",
 };
-const canonical = (x) =>
-  JSON.stringify(x, (_k, v) =>
-    v && typeof v === "object" && !Array.isArray(v)
-      ? Object.fromEntries(
-          Object.entries(v).sort(([a], [b]) => a.localeCompare(b)),
-        )
-      : v,
-  );
-const digest = (x) => hash(canonical(x));
 const now = () => new Date().toISOString();
+const hubOptional = ["automaticExecutionEnabled", "disabled"];
 const hubOwnsField = (payload, field) =>
-  !["automaticExecutionEnabled", "disabled"].includes(field) ||
-  payload?.[field] != null;
+  !hubOptional.includes(field) || payload?.[field] != null;
+// An applied receipt may leave out fields it took as delivered; they keep the delivered value.
+const hubReported = (snapshot, payload, field) =>
+  (
+    hubOptional.includes(field)
+      ? snapshot[field] != null
+      : Object.hasOwn(snapshot, field)
+  )
+    ? snapshot[field]
+    : payload?.[field];
 // The resolved entry URL may be a native default, not a saved custom setting.
 const hubConfiguration = (observation, previous = {}) => ({
   ...previous,
@@ -141,8 +148,7 @@ export class Distribution {
   list() {
     return Object.keys(targetNames).map((id) => {
       const t = this.config(id),
-        history = this.currentJobs(id),
-        jobs = history;
+        jobs = this.currentJobs(id);
       const notApplicable =
         id === "all-api-hub"
           ? this.store
@@ -171,7 +177,7 @@ export class Distribution {
           not_applicable: notApplicable,
         },
         lastAppliedAt:
-          history
+          jobs
             .filter((j) => j.state === "applied")
             .map((j) => j.appliedAt)
             .sort()
@@ -181,7 +187,13 @@ export class Distribution {
   }
   save(id, version, changes) {
     const t = this.config(id);
-    if (t.version !== version) throw new Problem(409, "同步设置已改变");
+    if (t.version !== version)
+      throw new Problem(
+        409,
+        "同步设置已改变",
+        { currentVersion: t.version },
+        "version_conflict",
+      );
     if (changes.enabled && !t.adoptedAt)
       throw new Problem(409, "请先预览并确认首次接管");
     const changedDestination = [
@@ -196,30 +208,38 @@ export class Distribution {
       version: version + 1,
       ...(changedDestination ? { enabled: false, adoptedAt: null } : {}),
     };
-    if (changedDestination) {
-      for (const link of this.store
-        .list("targetLink")
-        .filter((l) => l.target === id)) {
-        this.store.put("targetLinkHistory", {
-          ...link,
-          id: randomUUID(),
-          previousId: link.id,
-        });
-        this.store.db
-          .prepare("DELETE FROM entities WHERE kind='targetLink' AND id=?")
-          .run(link.id);
+    this.store.transaction(() => {
+      if (changedDestination) {
+        for (const link of this.store
+          .list("targetLink")
+          .filter((l) => l.target === id)) {
+          this.store.put("targetLinkHistory", {
+            ...link,
+            id: randomUUID(),
+            previousId: link.id,
+          });
+          this.store.db
+            .prepare("DELETE FROM entities WHERE kind='targetLink' AND id=?")
+            .run(link.id);
+        }
+        for (const j of this.store
+          .list("delivery")
+          .filter((j) => j.target === id && j.state !== "applied"))
+          this.store.put("delivery", { ...j, state: "superseded" });
       }
-      for (const j of this.store
-        .list("delivery")
-        .filter((j) => j.target === id && j.state !== "applied"))
-        this.store.put("delivery", { ...j, state: "superseded" });
-    }
-    this.store.setting(`target:${id}`, next);
+      this.store.setting(`target:${id}`, next);
+    });
     return this.list().find((x) => x.id === id);
   }
   credential(id, version, value) {
     const t = this.config(id);
-    if (t.version !== version) throw new Problem(409, "同步设置已改变");
+    if (t.version !== version)
+      throw new Problem(
+        409,
+        "同步设置已改变",
+        { currentVersion: t.version },
+        "version_conflict",
+      );
     this.store.setting(`target:${id}`, {
       ...t,
       credentialId: this.store.secret(value, t.credentialId),
@@ -490,10 +510,10 @@ export class Distribution {
     if (p.confirmedAt) {
       if (
         subjectIds &&
-        canonical([...subjectIds].sort()) !==
-          canonical(
-            [...(p.selectedSubjects || p.rows.map((r) => r.subject))].sort(),
-          )
+        !same(
+          [...subjectIds].sort(),
+          [...(p.selectedSubjects || p.rows.map((r) => r.subject))].sort(),
+        )
       )
         throw new Problem(409, "已确认的预览不能扩大接管范围");
       return this.list().find((x) => x.id === id);
@@ -641,13 +661,8 @@ export class Distribution {
       changes: Object.keys(desired)
         .filter(
           (k) =>
-            ![
-              "credentialFingerprint",
-              "headerValues",
-              "connectionVersion",
-            ].includes(k) &&
             (j.target !== "all-api-hub" || hubOwnsField(p, k)) &&
-            canonical(desired[k]) !== canonical(actual[k]),
+            !same(desired[k], actual[k]),
         )
         .map((field) => ({
           field,
@@ -748,7 +763,10 @@ export class Distribution {
         ? Object.keys(actual).some(
             (field) =>
               hubOwnsField(job?.payload, field) &&
-              canonical(actual[field]) !== canonical(link.snapshot[field]),
+              !same(
+                actual[field],
+                hubReported(link.snapshot, job?.payload, field),
+              ),
           )
         : digest(actual) !== digest(link.snapshot));
     const conflict = changed && job?.state === "applied";
@@ -821,54 +839,60 @@ export class Distribution {
             )
           : link.conflictSnapshot;
       if (!remote) throw new Problem(409, "请让目标重新回报当前配置");
-      this.store.put("targetLink", {
-        ...link,
-        snapshot: remote,
-        state: "adopted",
-        conflictSnapshot: null,
-      });
-      if (j.target === "newapi") {
-        const c = this.store.require("channel", j.subject);
-        this.resources.update("channel", c.id, c.version, {
-          name: remote.name,
-          baseUrl: remote.base_url,
-          models: remote.models.split(",").filter(Boolean),
-          enabled: remote.status === 1,
+      this.store.transaction(() => {
+        // Center updates reconcile against this link, so it must read as adopted first.
+        this.store.put("targetLink", {
+          ...link,
+          snapshot: remote,
+          state: "adopted",
+          conflictSnapshot: null,
         });
-      } else if (j.target === "all-api-hub") {
-        const a = this.store.require("account", j.subject),
-          s = this.store.require("site", a.siteId);
-        this.resources.update("site", s.id, s.version, {
-          name: remote.name,
-          checkinUrl: remote.checkinUrl || null,
-        });
-        if (remote.automaticExecutionEnabled != null || remote.disabled != null)
-          this.resources.update("account", a.id, a.version, {
-            ...(remote.automaticExecutionEnabled != null
-              ? { checkinEnabled: remote.automaticExecutionEnabled }
-              : {}),
-            ...(remote.disabled != null ? { enabled: !remote.disabled } : {}),
+        if (j.target === "newapi") {
+          const c = this.store.require("channel", j.subject);
+          this.resources.update("channel", c.id, c.version, {
+            name: remote.name,
+            baseUrl: remote.base_url,
+            models: remote.models.split(",").filter(Boolean),
+            enabled: remote.status === 1,
           });
-      } else if (j.target === "sillytavern") {
-        const c = this.store.require("channel", j.subject);
-        const { name, baseUrl, protocol, models, order, enabled } = remote;
-        this.resources.update("channel", c.id, c.version, {
-          name,
-          baseUrl,
-          protocol,
-          models,
-          order,
-          enabled,
+        } else if (j.target === "all-api-hub") {
+          const a = this.store.require("account", j.subject),
+            s = this.store.require("site", a.siteId);
+          this.resources.update("site", s.id, s.version, {
+            name: remote.name,
+            checkinUrl: remote.checkinUrl || null,
+          });
+          if (
+            remote.automaticExecutionEnabled != null ||
+            remote.disabled != null
+          )
+            this.resources.update("account", a.id, a.version, {
+              ...(remote.automaticExecutionEnabled != null
+                ? { checkinEnabled: remote.automaticExecutionEnabled }
+                : {}),
+              ...(remote.disabled != null ? { enabled: !remote.disabled } : {}),
+            });
+        } else if (j.target === "sillytavern") {
+          const c = this.store.require("channel", j.subject);
+          const { name, baseUrl, protocol, models, order, enabled } = remote;
+          this.resources.update("channel", c.id, c.version, {
+            name,
+            baseUrl,
+            protocol,
+            models,
+            order,
+            enabled,
+          });
+        } else throw new Problem(400, "镜像不支持反向采用配置");
+        this.store.put("targetLink", {
+          ...link,
+          snapshot: remote,
+          state: "applied",
+          conflictSnapshot: null,
         });
-      } else throw new Problem(400, "镜像不支持反向采用配置");
-      this.store.put("targetLink", {
-        ...link,
-        snapshot: remote,
-        state: "applied",
-        conflictSnapshot: null,
+        this.store.put("delivery", { ...j, state: "superseded" });
+        this.reconcile(j.target);
       });
-      this.store.put("delivery", { ...j, state: "superseded" });
-      this.reconcile(j.target);
     } else {
       this.store.put("targetLink", {
         ...link,
@@ -1031,9 +1055,7 @@ export class Distribution {
       throw new Problem(409, `等待模型任务验证：${unverified.join("、")}`);
     let remote = link?.remoteId
       ? await this.sources.request(source, `/api/channel/${link.remoteId}`)
-      : (await this.sources.pages(source, "/api/channel/")).find(
-          (r) => r.tag === `arc-managed-${c.id}`,
-        );
+      : await findByTag(this.sources, source, `arc-managed-${c.id}`);
     if (!remote && !shouldEnable) {
       if (p.enabled)
         throw new Problem(409, p.routing?.reasons.join("、") || "权益尚不可用");
@@ -1052,24 +1074,9 @@ export class Distribution {
         c.headersManagedBy === "manual" ||
         c.credentialHeadersId ||
         p.headerValues.length
-          ? JSON.stringify(
-              Object.fromEntries(p.headerValues.map((h) => [h.name, h.value])),
-            )
+          ? headerOverride(p.headerValues)
           : remote?.header_override || "",
-      type:
-        remote &&
-        (remote.type === 14
-          ? "Anthropic"
-          : remote.type === 24
-            ? "Gemini"
-            : "OpenAI") ===
-          (p.protocol === "OpenAI Responses" ? "OpenAI" : p.protocol)
-          ? remote.type
-          : p.protocol === "Anthropic"
-            ? 14
-            : p.protocol === "Gemini"
-              ? 24
-              : 1,
+      type: channelType(p.protocol, remote),
     };
     const write = shouldEnable ? desired : { status: 2 };
     if (
@@ -1127,22 +1134,16 @@ export class Distribution {
       await this.sources.request(source, "/api/channel/", "POST", {
         mode: "single",
         channel: {
-          type:
-            p.protocol === "Anthropic" ? 14 : p.protocol === "Gemini" ? 24 : 1,
           priority: 0,
           weight: 100,
           ...desired,
           key: this.store.reveal(p.credentialId),
           group: "default",
           tag: `arc-managed-${c.id}`,
-          ...(c.nativePassthrough
-            ? { setting: JSON.stringify({ pass_through_body_enabled: true }) }
-            : {}),
+          ...passthroughSetting(c),
         },
       });
-      remote = (await this.sources.pages(source, "/api/channel/")).find(
-        (r) => r.tag === `arc-managed-${c.id}`,
-      );
+      remote = await findByTag(this.sources, source, `arc-managed-${c.id}`);
       if (!remote) throw new Problem(502, "创建后尚未回读到渠道");
     }
     if (
@@ -1209,10 +1210,8 @@ export class Distribution {
     const target = auth.scope.target,
       t = this.config(target);
     if (
-      auth.role !== "connector" ||
-      !["all-api-hub", "chrome-bookmarks", "sillytavern"].includes(target) ||
       auth.scope.sourceId !==
-        (t.sourceId || (target === "chrome-bookmarks" ? "all-api-hub" : target))
+      (t.sourceId || (target === "chrome-bookmarks" ? "all-api-hub" : target))
     )
       throw new Problem(403, "执行凭据与目标不匹配");
     if (!t.enabled) return { items: [] };
@@ -1308,6 +1307,9 @@ export class Distribution {
     if (input.lease !== j.lease || j.state !== "running")
       throw new Problem(409, "任务租约已变化，请重新领取");
     if (input.reason) input.reason = errorMessage(input.reason);
-    return this.finish(j.id, input);
+    return this.finish(j.id, {
+      ...input,
+      snapshot: withoutSecrets(input.snapshot),
+    });
   }
 }
