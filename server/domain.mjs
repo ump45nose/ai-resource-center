@@ -82,33 +82,19 @@ export function nextReset(time, tz, resetAt) {
     throw new Error("该重置时刻在所选时区不存在，请填写明确截止时间");
   return new Date(end).toISOString();
 }
-export function availability(c, a, now = new Date()) {
-  if (!c.enabled) return "人工暂停";
-  if (!c.credentialId && !c.gateway && !c.nativeCredentialRef) return "缺 key";
-  if (c.availability && c.availability !== "可用") return c.availability;
-  if (c.callIssue) return c.callIssue.reason;
-  if (a?.status && a.status !== "正常") return a.status;
-  if (a?.balance !== null && a?.balance !== undefined && a.balance <= 0)
-    return "余额耗尽";
-  if (a?.validUntil && new Date(a.validUntil) <= now) return "额度已到期";
-  const windows = a?.benefit?.windows;
-  if (windows?.length) {
-    const t = new Intl.DateTimeFormat("en-GB", {
-      timeZone: a.benefit.tz,
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    }).format(now);
-    if (
-      !windows.some((w) =>
-        w.start <= w.end
-          ? t >= w.start && t < w.end
-          : t >= w.start || t < w.end,
-      )
-    )
-      return "窗口关闭";
-  }
-  return null;
+export const clock = (tz) =>
+  new Intl.DateTimeFormat("en-GB", {
+    timeZone: tz,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+export function windowOpen(windows, tz, now = new Date()) {
+  if (!windows?.length) return true;
+  const t = clock(tz).format(now);
+  return windows.some((w) =>
+    w.start <= w.end ? t >= w.start && t < w.end : t >= w.start || t < w.end,
+  );
 }
 export function errorType(text = "", status = 0) {
   if (status === 429 || /rate.?limit|限流/i.test(text)) return "rate";

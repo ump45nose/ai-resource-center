@@ -1,3 +1,5 @@
+import { policies } from "./maintenance-policy.mjs";
+
 const DAY = 86400000;
 
 // A window advances only on distinct observations; silence is not a failure.
@@ -59,7 +61,7 @@ export function observeSuccess(store, kind, id, scope, at) {
 }
 
 export function matureFailure(store, window, now = Date.now()) {
-  const days = store.setting("maintenancePolicy")?.archiveAfterDays ?? 14;
+  const days = policies(store).archiveAfterDays;
   return (
     window?.count > 1 &&
     Date.parse(window.at) <= now &&
@@ -68,5 +70,5 @@ export function matureFailure(store, window, now = Date.now()) {
 }
 
 export function archiveReviewHours(store) {
-  return store.setting("maintenancePolicy")?.archiveReviewHours ?? 168;
+  return policies(store).archiveReviewHours;
 }

@@ -2,6 +2,8 @@ import { archiveLabels, archiveOf, tagsOf } from "./channel-rules.mjs";
 import { policies, reviewManaged } from "./maintenance-policy.mjs";
 import { observeFailure, observeSuccess, matureFailure } from "./failure-window.mjs";
 
+const nonQualityErrors = ["rate", "quota", "account", "input", "cancelled"];
+
 export function managedHealth(store, c) {
   return policies(store).enabled && reviewManaged(store, c);
 }
@@ -175,6 +177,9 @@ export function observeTaskHealth(store, offering, verification) {
     lastTaskId: id,
     at: verification.at,
   };
+  const banned =
+    verification.errorType === "account" &&
+    /封禁|未注册|account.*banned/i.test(verification.reason || "");
   if (verification.result === "success" && verification.quality === "passed") {
     observeChannelSuccess(store, c.id, verification.at);
     Object.assign(next, {
@@ -185,11 +190,7 @@ export function observeTaskHealth(store, offering, verification) {
     });
   } else if (
     verification.result === "failure" &&
-    (!["rate", "quota", "account", "input", "cancelled"].includes(
-      verification.errorType,
-    ) ||
-      (verification.errorType === "account" &&
-        /封禁|未注册|account.*banned/i.test(verification.reason || "")))
+    (!nonQualityErrors.includes(verification.errorType) || banned)
   ) {
     const op =
       verification.operationId &&
@@ -202,8 +203,7 @@ export function observeTaskHealth(store, offering, verification) {
     const invalid =
       (verification.errorType === "key" &&
         !tagsOf(c).includes("client_restricted")) ||
-      (verification.errorType === "account" &&
-        /封禁|未注册|account.*banned/i.test(verification.reason || ""));
+      banned;
     const retired =
       verification.httpStatus === 410 ||
       /旧接口.*停用|接口已停用|endpoint.*retired/i.test(
@@ -307,9 +307,8 @@ export function reconcileCallHealth(store, channelIds) {
         .all(c.id, modelId, since)
         .filter(
           (r) =>
-            !["rate", "quota", "account", "input", "cancelled"].includes(
-              r.error_type,
-            ) || r.summary === "账号封禁",
+            !nonQualityErrors.includes(r.error_type) ||
+            r.summary === "账号封禁",
         );
       if (!rows.length || rows[0].result !== "failure") continue;
       if (
@@ -342,17 +341,18 @@ export function reconcileCallHealth(store, channelIds) {
         },
       });
     }
+    const healthAt = store
+      .list("offering")
+      .filter((o) => o.channelId === c.id)
+      .map((o) => o.health?.at)
+      .filter(Boolean)
+      .sort()
+      .at(-1);
     changed =
       reconcileBlockedModels(store, c, {
-        id: `calls:${c.id}:${store
-          .list("offering")
-          .filter((o) => o.channelId === c.id)
-          .map((o) => o.health?.at || "")
-          .sort()
-          .at(-1)}`,
+        id: `calls:${c.id}:${healthAt}`,
         source: "calls",
-        at: store.list("offering").filter((o) => o.channelId === c.id)
-          .map((o) => o.health?.at).filter(Boolean).sort().at(-1),
+        at: healthAt,
         reason: "已排除限流、额度、输入和取消错误",
       }) || changed;
   }

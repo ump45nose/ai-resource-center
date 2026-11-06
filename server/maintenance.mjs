@@ -2,9 +2,11 @@ import {
   autoManaged,
   autoScope,
   reviewManaged,
+  policies,
+  maintenanceStatus,
 } from "./maintenance-policy.mjs";
-import { policies, maintenanceStatus } from "./maintenance-policy.mjs";
-import { gatewayBlock, taskBlock, tagsOf } from "./channel-rules.mjs";
+import { gatewayBlock, taskBlock } from "./channel-rules.mjs";
+import { smokeSupported } from "./verification-task.mjs";
 import { dayKey } from "./domain.mjs";
 
 export class Maintenance {
@@ -136,8 +138,7 @@ export class Maintenance {
     )
       validationBlocked = "模型目录检查未通过，等待下次扫描";
     if (!validationBlocked && !this.taskFor(c)) {
-      if (tagsOf(c).includes("client_restricted") || c.protocol !== "OpenAI")
-        validationBlocked = "等待对应客户端任务适配";
+      if (!smokeSupported(c)) validationBlocked = "等待对应客户端任务适配";
       else if (!policies(this.store).smokeEnabled)
         validationBlocked = "请绑定已适配 cron 或启用小任务";
     }
@@ -283,9 +284,7 @@ export class Maintenance {
         const binding = this.taskFor(c, o.modelId);
         if (
           !binding &&
-          (!policies(this.store).smokeEnabled ||
-            tagsOf(c).includes("client_restricted") ||
-            c.protocol !== "OpenAI")
+          (!policies(this.store).smokeEnabled || !smokeSupported(c))
         ) {
           waiting.push({
             channelId: c.id,

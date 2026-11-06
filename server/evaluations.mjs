@@ -1,6 +1,6 @@
 import { observeTaskHealth } from "./channel-health.mjs";
-import { tagsOf, taskBlock, channelHeaders } from "./channel-rules.mjs";
-import { verificationTask } from "./verification-task.mjs";
+import { taskBlock, channelHeaders } from "./channel-rules.mjs";
+import { verificationTask, smokeSupported } from "./verification-task.mjs";
 import { verified, autoManaged } from "./maintenance-policy.mjs";
 import { eligible, entitlement, policies } from "./resources.mjs";
 import { Problem, errorMessage } from "./errors.mjs";
@@ -85,7 +85,7 @@ export class Evaluations {
     const task = verificationTask(c);
     const blocked = taskBlock(c, task);
     if (blocked) throw new Problem(409, blocked);
-    if (tagsOf(c).includes("client_restricted") || c.protocol !== "OpenAI")
+    if (!smokeSupported(c))
       throw new Problem(
         409,
         "此调用方式使用对应客户端任务验证，不使用通用小任务",

@@ -21,9 +21,10 @@ export class Scans {
           (!ids.length || ids.includes(c.id)) &&
           (!input.siteIds?.length || input.siteIds.includes(c.siteId)),
       );
-    for (const c of channels.filter((c) =>
+    const ready = channels.filter((c) =>
       eligible(this.store, c, { media: true }),
-    ))
+    );
+    for (const c of ready)
       this.store.put("channel", {
         ...c,
         maintenance: {
@@ -32,15 +33,13 @@ export class Scans {
         },
       });
     const excluded = channels
-      .filter((c) => !eligible(this.store, c, { media: true }))
+      .filter((c) => !ready.includes(c))
       .map((c) => ({
         channelId: c.id,
         reason: probeBlock(this.store, c) || "此渠道不参加主动验证",
       }));
     const targets = new Map();
-    for (const c of channels.filter((c) =>
-      eligible(this.store, c, { media: true }),
-    )) {
+    for (const c of ready) {
       const site = sites.find((s) => s.id === c.siteId),
         url = new URL(site?.url || c.baseUrl).origin;
       if (!targets.has(url))
@@ -59,6 +58,16 @@ export class Scans {
     }
     const queue = [...targets.values()],
       results = [];
+    let completed = 0;
+    const done = () =>
+      progress({
+        result: {
+          completed: ++completed,
+          total: targets.size,
+          excluded,
+          sites: results,
+        },
+      });
     progress({
       stage: "读取模型目录与站方指标",
       result: { completed: 0, total: queue.length, excluded },
@@ -74,7 +83,10 @@ export class Scans {
                 media: true,
               }),
             );
-            if (!target.channels.length) continue;
+            if (!target.channels.length) {
+              done();
+              continue;
+            }
             let website;
             try {
               const r = await this.fetch(target.url, {
@@ -102,14 +114,7 @@ export class Scans {
             result.website = website;
             this.persist(result, target.siteIds);
             results.push(result);
-            progress({
-              result: {
-                completed: results.length,
-                total: targets.size,
-                excluded,
-                sites: results,
-              },
-            });
+            done();
           }
         },
       ),
@@ -198,6 +203,8 @@ export class Scans {
       throw new Problem(400, "该资源不参加主动文字验证");
     const p = policies(this.store),
       now = Date.now();
+    const weak = (o) =>
+      o.grade?.samples >= p.samples && o.grade?.successRate < p.warn;
     return this.store
       .list("offering")
       .filter(
@@ -211,7 +218,7 @@ export class Scans {
             ["最近失败", "近期连续失败"].includes(o.candidate)
           ) &&
           (!verified(o, c) ||
-            (o.grade?.samples >= p.samples && o.grade?.successRate < p.warn) ||
+            weak(o) ||
             now - Date.parse(o.verification.at) >=
               p.newModelsHours * 3600000) &&
           (!o.verification?.at ||
@@ -220,7 +227,7 @@ export class Scans {
             now - Date.parse(o.verification.at) >=
               (o.verification.result === "success" &&
               !archiveOf(c).includes("unstable") &&
-              !(o.grade?.samples >= p.samples && o.grade?.successRate < p.warn)
+              !weak(o)
                 ? p.newModelsHours
                 : p.maintenanceHours) *
                 3600000),

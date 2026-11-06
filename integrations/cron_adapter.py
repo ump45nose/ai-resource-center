@@ -1,11 +1,11 @@
 """Use from an existing cron entrypoint; never starts or resumes a scheduled job."""
 import argparse
+from http.client import HTTPException
 import json
 import os
 from pathlib import Path
 from urllib.parse import quote
 from urllib.request import Request, urlopen
-from urllib.error import HTTPError, URLError
 
 
 class ResourceCenter:
@@ -52,7 +52,8 @@ class ResourceCenter:
                     saved += 1
                 else:
                     pending += 1
-            except (HTTPError, URLError):
+            except (OSError, HTTPException, ValueError):
+                # Unreadable or unsent receipts stay for the next round; keep flushing the rest.
                 pending += 1
         return {"acknowledged": saved, "pending": pending}
 

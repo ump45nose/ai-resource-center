@@ -1,64 +1,7 @@
-import { channelHeaders, probeBlock } from "./channel-rules.mjs";
+import { probeBlock } from "./channel-rules.mjs";
 import { canonicalApi } from "./domain.mjs";
 
-const origin = (url) => new URL(url).origin;
 const finite = (value) => (Number.isFinite(value) ? value : null);
-
-// Account catalogs and site-wide observations remain separate throughout the scan.
-export function scanTargets(
-  store,
-  { categories = ["general"], excludeHosts = [] } = {},
-) {
-  const channels = store.list("channel"),
-    sites = store.list("site");
-  const addresses = (c) => {
-    const s = sites.find((s) => s.id === c.siteId);
-    return [c.baseUrl, s?.url, ...(s?.aliases || [])].filter(
-      (x) => typeof x === "string" && /^https?:/.test(x),
-    );
-  };
-  const rpHosts = new Set(
-    channels
-      .filter((c) => c.category === "rp")
-      .flatMap(addresses)
-      .map((x) => new URL(x).host),
-  );
-  const excluded = [],
-    targets = new Map();
-  for (const c of channels.filter((c) => categories.includes(c.category))) {
-    const urls = addresses(c),
-      hosts = urls.map((u) => new URL(u).host);
-    const reason = hosts.some((h) => rpHosts.has(h))
-      ? "已在 RP 中"
-      : hosts.some((h) => excludeHosts.includes(h))
-        ? "人工排除"
-        : null;
-    if (reason) {
-      excluded.push({ channelId: c.id, name: c.name, url: c.baseUrl, reason });
-      continue;
-    }
-    const site = sites.find((s) => s.id === c.siteId);
-    const url = origin(site?.url || c.baseUrl);
-    if (!targets.has(url))
-      targets.set(url, {
-        url,
-        name: site?.name || new URL(url).host,
-        channels: [],
-      });
-    targets.get(url).channels.push({
-      id: c.id,
-      name: c.name,
-      baseUrl: c.baseUrl,
-      protocol: c.protocol,
-      authType: c.authType,
-      models: c.models || [],
-      enabled: c.enabled,
-      credentialId: c.credentialId,
-      headers: channelHeaders(store, c),
-    });
-  }
-  return { targets: [...targets.values()], excluded };
-}
 
 export async function readJson(
   url,
@@ -220,6 +163,7 @@ export function assessment(m, now = Date.now()) {
   return "表现波动";
 }
 
+// Account catalogs and site-wide observations remain separate throughout the scan.
 export async function scanSite(
   target,
   { store, fetcher = fetch, hours = 24, detailLimit = Infinity } = {},
@@ -325,19 +269,4 @@ export async function scanSite(
           : (metrics || []).filter((m) => !listed.has(m.name)).length,
     },
   };
-}
-
-export async function scanAll(targets, options, onSite = () => {}) {
-  const queue = [...targets],
-    results = [];
-  await Promise.all(
-    Array.from({ length: Math.min(5, targets.length) }, async () => {
-      while (queue.length) {
-        const result = await scanSite(queue.shift(), options);
-        results.push(result);
-        await onSite(result);
-      }
-    }),
-  );
-  return results.sort((a, b) => a.url.localeCompare(b.url));
 }

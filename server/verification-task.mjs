@@ -1,4 +1,8 @@
 import { randomInt } from "node:crypto";
+import { tagsOf } from "./channel-rules.mjs";
+
+export const smokeSupported = (c) =>
+  !tagsOf(c).includes("client_restricted") && c.protocol === "OpenAI";
 
 export function verificationTask(channel) {
   const a = randomInt(4, 20),

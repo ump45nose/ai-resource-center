@@ -89,7 +89,11 @@ def execute(client, work):
         raise ValueError('invalid run ID')
     ledger = state_dir / (run_id + '.json')
     if ledger.exists():
-        old = json.loads(ledger.read_text())
+        try:
+            old = json.loads(ledger.read_text())
+        except (OSError, ValueError):
+            # Outcome unknown: never regenerate, and do not hold back later items.
+            return {'state': 'waiting', 'reason': '本地运行记录无法读取，需人工核对'}
         if old.get('receipt'):
             return client.result(old['receipt'])
         # Process stopped after claiming. Never retry an inference with unknown outcome.

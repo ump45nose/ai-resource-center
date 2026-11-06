@@ -1,4 +1,4 @@
-import { nextReset } from "./domain.mjs";
+import { nextReset, windowOpen, clock } from "./domain.mjs";
 import {
   probeBlock,
   archiveOf,
@@ -8,8 +8,6 @@ import {
 
 export const defaults = {
   enabled: false,
-  syncMinutes: 10,
-  callsMinutes: 1,
   normalHours: 24,
   maintenanceHours: 6,
   closedHours: 24,
@@ -40,7 +38,10 @@ export const defaults = {
 };
 
 export function policies(store) {
-  return { ...defaults, ...(store.setting("maintenancePolicy") || {}) };
+  // Retired keys may linger in older settings; the strict PATCH schema rejects them.
+  const { syncMinutes, callsMinutes, ...stored } =
+    store.setting("maintenancePolicy") || {};
+  return { ...defaults, ...stored };
 }
 
 export function currentBalance(account, now = new Date()) {
@@ -87,21 +88,7 @@ export function entitlement(account, now = new Date()) {
     reasons.push("余额耗尽");
   if (dailyExpired && !longAvailable && account?.quota === "daily")
     reasons.push("额度已到期");
-  const time = new Intl.DateTimeFormat("en-GB", {
-    timeZone: timezone,
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).format(now);
-  if (
-    benefit.windows?.length &&
-    !benefit.windows.some((w) =>
-      w.start <= w.end
-        ? time >= w.start && time < w.end
-        : time >= w.start || time < w.end,
-    )
-  )
-    reasons.push("窗口关闭");
+  if (!windowOpen(benefit.windows, timezone, now)) reasons.push("窗口关闭");
   return {
     available: !reasons.length,
     availability: !balanceCurrent ? "unknown" : reasons.length ? "unavailable" : "available",
@@ -150,27 +137,24 @@ export function autoManaged(store, c) {
   return policies(store).enabled && c.mode === "auto" && autoScope(store, c);
 }
 
-export function modelPreference(modelId, policy) {
-  const name = modelId.toLowerCase();
-  const matches = (text) =>
-    text
-      .split(",")
-      .map((s) => s.trim().toLowerCase())
-      .filter(Boolean)
-      .some((s) => name.includes(s));
-  const excluded = policy.excludedModels
+const terms = (text) =>
+  text
     .split(",")
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
+export function modelPreference(modelId, policy) {
+  const name = modelId.toLowerCase();
   if (
-    excluded.some((value) =>
+    terms(policy.excludedModels).some((value) =>
       ["mini", "nano"].includes(value)
         ? new RegExp(`(^|[-_/ .])${value}($|[-_/ .])`).test(name)
         : name.includes(value),
     )
   )
     return null;
-  const index = policy.modelRules.findIndex((rule) => matches(rule.match));
+  const index = policy.modelRules.findIndex((rule) =>
+    terms(rule.match).some((s) => name.includes(s)),
+  );
   return index < 0
     ? null
     : { proposedClass: policy.modelRules[index].capabilityClass, rank: index };
@@ -270,12 +254,7 @@ export function maintenanceStatus(
     const starts = windowClosed
       ? (account?.benefit?.windows || []).map((w) => w.start)
       : times;
-    const fmt = new Intl.DateTimeFormat("en-GB", {
-      timeZone: rights.timezone,
-      hour: "2-digit",
-      minute: "2-digit",
-      hourCycle: "h23",
-    });
+    const fmt = clock(rights.timezone);
     for (
       let at = Math.floor(earliest / 60000) * 60000 + 60000;
       at < now + 49 * 3600000;
