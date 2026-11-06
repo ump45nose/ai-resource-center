@@ -5,7 +5,6 @@ import {
   Box,
   CalendarCheck2,
   Cable,
-  Check,
   CircleHelp,
   Globe2,
   LogOut,
@@ -19,7 +18,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import { Badge, Button, Overlay } from "./components";
+import { Badge, Button, Overlay, ToastRegion, showToast } from "./components";
 import { api, allPages, ApiError, errorText } from "./api";
 import {
   balances,
@@ -42,7 +41,7 @@ import Scans from "./pages/Scans";
 import Benefits from "./pages/Benefits";
 
 type Panel =
-  | { kind: "site"; id: string }
+  | { kind: "site"; id: string; channel?: string }
   | { kind: "model"; id: string }
   | { kind: "source"; source?: Source }
   | { kind: "help" };
@@ -71,9 +70,8 @@ export default function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
-  const [toast, setToast] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
-  const notify = (text: string) => setToast(text);
+  const notify = showToast;
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
@@ -137,11 +135,6 @@ export default function App() {
       window.removeEventListener("keydown", onKey);
     };
   }, []);
-  useEffect(() => {
-    if (!toast) return;
-    const timer = setTimeout(() => setToast(""), 5000);
-    return () => clearTimeout(timer);
-  }, [toast]);
   function navigate(next: Page) {
     window.location.hash = next;
     setMenuOpen(false);
@@ -212,7 +205,7 @@ export default function App() {
         meta,
         query,
         navigate,
-        inspectSite: (id) => setPanel({ kind: "site", id }),
+        inspectSite: (id, channel) => setPanel({ kind: "site", id, channel }),
         inspectModel: (id) => setPanel({ kind: "model", id }),
         configureSource: (source) => setPanel({ kind: "source", source }),
         sourceAction,
@@ -281,6 +274,7 @@ export default function App() {
           <nav className="main-nav">
             <a
               href="#benefits"
+              aria-current={page === "benefits" ? "page" : undefined}
               className={page === "benefits" ? "active" : ""}
               onClick={() => setMenuOpen(false)}
             >
@@ -388,6 +382,7 @@ export default function App() {
       {site && (
         <ManagementPanel
           site={site}
+          channel={panel?.kind === "site" ? panel.channel : undefined}
           close={() => setPanel(null)}
           refresh={refresh}
           notify={notify}
@@ -407,7 +402,9 @@ export default function App() {
               <button
                 className="detail-route"
                 key={channel.id}
-                onClick={() => setPanel({ kind: "site", id: site.id })}
+                onClick={() =>
+                  setPanel({ kind: "site", id: site.id, channel: channel.id })
+                }
               >
                 <div>
                   <strong>{site.name}</strong>
@@ -486,15 +483,7 @@ export default function App() {
           </div>
         </Overlay>
       )}
-      {toast && (
-        <div className="toast" role="status">
-          <Check size={16} />
-          <span>{toast}</span>
-          <button aria-label="关闭提示" onClick={() => setToast("")}>
-            <X size={14} />
-          </button>
-        </div>
-      )}
+      <ToastRegion />
     </WorkspaceProvider>
   );
 }

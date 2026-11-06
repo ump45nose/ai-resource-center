@@ -69,7 +69,10 @@ export default function Models() {
             <code className="model-id">{m.id}</code>
             <div className="route-list">
               {m.channels.slice(0, 3).map(({ site, channel, verified }) => (
-                <button key={channel.id} onClick={() => inspectSite(site.id)}>
+                <button
+                  key={channel.id}
+                  onClick={() => inspectSite(site.id, channel.id)}
+                >
                   <span
                     className={`status-dot ${verified ? "green" : "clay"}`}
                   />

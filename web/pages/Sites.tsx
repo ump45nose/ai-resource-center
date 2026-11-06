@@ -36,7 +36,13 @@ import {
 import { useWorkspace } from "../workspace";
 import { api, copyText, errorText } from "../api";
 
-function KeyCell({ site, onEdit }: { site: Site; onEdit: () => void }) {
+function KeyCell({
+  site,
+  onEdit,
+}: {
+  site: Site;
+  onEdit: (channel?: string) => void;
+}) {
   const { notify } = useWorkspace();
   const [copying, setCopying] = useState<string | null>(null);
   async function copy(id: string) {
@@ -79,7 +85,7 @@ function KeyCell({ site, onEdit }: { site: Site; onEdit: () => void }) {
               <button
                 className="hub-entry-button"
                 aria-label={`补 key：${channel.name}`}
-                onClick={onEdit}
+                onClick={() => onEdit(channel.id)}
               >
                 补 key
               </button>
@@ -90,7 +96,7 @@ function KeyCell({ site, onEdit }: { site: Site; onEdit: () => void }) {
         <button
           className="hub-entry-button"
           aria-label={`配置渠道：${site.name}`}
-          onClick={onEdit}
+          onClick={() => onEdit()}
         >
           配置渠道
         </button>
@@ -470,7 +476,7 @@ export default function Sites() {
                   <div className="site-cell identity-cell">
                     <button
                       className="expand-button"
-                      aria-label={`展开 ${site.name} 渠道`}
+                      aria-label={`${site.name} 渠道`}
                       aria-expanded={expanded.includes(site.id)}
                       onClick={() =>
                         setExpanded(
@@ -550,7 +556,10 @@ export default function Sites() {
                       {site.accounts.length} 个独立账号
                     </span>
                   </div>
-                  <KeyCell site={site} onEdit={() => inspectSite(site.id)} />
+                  <KeyCell
+                    site={site}
+                    onEdit={(channel) => inspectSite(site.id, channel)}
+                  />
                   <HubCheckinCell
                     accounts={site.hubAccounts}
                     site={site}
@@ -598,7 +607,7 @@ export default function Sites() {
                       <div className="channel-inline" key={c.id}>
                         <button
                           className="table-title"
-                          onClick={() => inspectSite(site.id)}
+                          onClick={() => inspectSite(site.id, c.id)}
                         >
                           {c.name}
                         </button>

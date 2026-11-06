@@ -66,6 +66,7 @@ export const isVersionConflict = (e: unknown) =>
       e.details !== null &&
       "currentVersion" in e.details));
 export const conflictText = "资料已在其他入口更新，已读取最新版本，请重新修改";
+export const updatedText = "资料已在其他入口更新，已显示最新内容";
 export async function saveError(e: unknown, reload: () => Promise<unknown>) {
   if (!isVersionConflict(e)) return errorText(e);
   try {

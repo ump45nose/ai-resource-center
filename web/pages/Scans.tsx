@@ -296,7 +296,7 @@ export default function Scans() {
                     <td>
                       <button
                         className="table-title"
-                        onClick={() => inspectSite(site.id)}
+                        onClick={() => inspectSite(site.id, c.id)}
                       >
                         {c.name}
                       </button>

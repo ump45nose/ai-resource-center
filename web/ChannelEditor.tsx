@@ -1,12 +1,6 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import {
-  api,
-  conflictText,
-  errorText,
-  isVersionConflict,
-  saveError,
-} from "./api";
+import { api, errorText, saveError, updatedText } from "./api";
 import { Badge, Button } from "./components";
 import {
   archiveLabels,
@@ -19,59 +13,87 @@ import {
   type ChannelTag,
   type ChannelUsage,
 } from "./data";
+import { useVersionChange } from "./hooks";
 import RpConnections from "./RpConnections";
 import SyncStatus from "./SyncStatus";
+
+type Section = "channel" | "key" | "lifecycle";
 
 export default function ChannelEditor({
   channel: c,
   accounts,
-  conflict,
-  setConflict,
+  defaultOpen,
+  focused,
   refresh,
   notify,
 }: {
   channel: Channel;
   accounts: Account[];
-  conflict: boolean;
-  setConflict: (id: string) => void;
+  defaultOpen: boolean;
+  focused: boolean;
   refresh: () => Promise<void>;
   notify: (s: string) => void;
 }) {
-  const [open, setOpen] = useState(
-      conflict || c.credentialStatus === "missing",
-    ),
-    [error, setError] = useState(conflict ? conflictText : ""),
+  const [open, setOpen] = useState(defaultOpen),
+    [errors, setErrors] = useState<Partial<Record<Section, string>>>({}),
     [busy, setBusy] = useState(false),
+    [updated, setUpdated] = useState(false),
     [tags, setTags] = useState<ChannelTag[]>(c.tags),
     [choices, setChoices] = useState<{ id: string; name: string }[]>([]),
     [action, setAction] = useState("");
+  const heading = useRef<HTMLButtonElement>(null);
+  useVersionChange(c.version, () => {
+    setTags(c.tags);
+    setAction("");
+    setUpdated(open && !busy);
+    if (!busy) setErrors({});
+  });
+  useEffect(() => {
+    if (!focused) return;
+    // The parent Overlay opens its dialog in a later effect.
+    const frame = requestAnimationFrame(() => {
+      heading.current?.scrollIntoView({ block: "start" });
+      heading.current?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, []);
   useEffect(() => {
     void api<{ items: { id: string; name: string }[] }>(
       `/channels/${c.id}/credentials`,
     )
       .then((x) => setChoices(x.items))
-      .catch((e) => setError(errorText(e)));
-  }, [c.id]);
-  const run = async (fn: () => Promise<unknown>, message: string) => {
+      .catch((e) => setErrors((all) => ({ ...all, key: errorText(e) })));
+  }, [c.id, c.version]);
+  const run = async (
+    section: Section,
+    fn: () => Promise<unknown>,
+    message: string,
+  ) => {
     setBusy(true);
-    setError("");
-    setConflict("");
+    setErrors({});
+    setUpdated(false);
     try {
       await fn();
       await refresh();
       notify(message);
     } catch (e) {
-      if (isVersionConflict(e)) setConflict(c.id);
-      setError(await saveError(e, refresh));
+      setErrors({ [section]: await saveError(e, refresh) });
     } finally {
       setBusy(false);
     }
   };
+  const errorFor = (section: Section) =>
+    errors[section] && (
+      <p className="inline-error" role="alert">
+        {errors[section]}
+      </p>
+    );
   function save(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const f = new FormData(e.currentTarget),
       usage = f.get("usage") as ChannelUsage;
     void run(
+      "channel",
       () =>
         api(`/channels/${c.id}`, "PATCH", {
           version: c.version,
@@ -121,6 +143,7 @@ export default function ChannelEditor({
       key = String(f.get("newKey") || "").trim(),
       choiceId = f.get("choice");
     void run(
+      "key",
       () =>
         key
           ? api(`/channels/${c.id}/credential`, "PUT", {
@@ -138,6 +161,7 @@ export default function ChannelEditor({
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     void run(
+      "lifecycle",
       () =>
         api(`/channels/${c.id}/lifecycle`, "POST", {
           version: c.version,
@@ -152,9 +176,13 @@ export default function ChannelEditor({
   return (
     <article className="management-card">
       <button
+        ref={heading}
         className="management-card-heading"
         aria-expanded={open}
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          setOpen(!open);
+          setUpdated(false);
+        }}
       >
         {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         <strong>{c.name}</strong>
@@ -183,7 +211,12 @@ export default function ChannelEditor({
       )}
       {open && (
         <>
-          <form className="form-stack" onSubmit={save}>
+          {updated && (
+            <p className="quiet-notice" role="status">
+              {updatedText}
+            </p>
+          )}
+          <form className="form-stack" key={c.version} onSubmit={save}>
             <div className="form-grid">
               <label>
                 渠道名称
@@ -325,6 +358,7 @@ export default function ChannelEditor({
                 参与自动复查
               </label>
             </div>
+            {errorFor("channel")}
             <Button type="submit" variant="primary" disabled={busy}>
               保存渠道
             </Button>
@@ -339,7 +373,7 @@ export default function ChannelEditor({
                 ? "保存在 fn 加密凭据库"
                 : "待关联"}
             </summary>
-            <form className="form-stack" onSubmit={keySave}>
+            <form className="form-stack" key={c.version} onSubmit={keySave}>
               <label>
                 选择同账号已有 key
                 <select name="choice" defaultValue="">
@@ -360,6 +394,7 @@ export default function ChannelEditor({
                   placeholder="保存后不回显明文"
                 />
               </label>
+              {errorFor("key")}
               <Button type="submit" disabled={busy}>
                 保存 key 关联
               </Button>
@@ -367,7 +402,7 @@ export default function ChannelEditor({
           </details>
           <details>
             <summary>归档与停用</summary>
-            <form className="form-stack" onSubmit={lifecycle}>
+            <form className="form-stack" key={c.version} onSubmit={lifecycle}>
               <label>
                 操作
                 <select
@@ -420,6 +455,7 @@ export default function ChannelEditor({
                   确认永久移除，保留历史
                 </label>
               )}
+              {errorFor("lifecycle")}
               <Button type="submit" disabled={busy || !action}>
                 确认操作
               </Button>
@@ -427,13 +463,8 @@ export default function ChannelEditor({
           </details>
         </>
       )}
-      {error && (
-        <p className="inline-error" role="alert">
-          {error}
-        </p>
-      )}
-      <SyncStatus subject={c.id} />
-      <RpConnections channelId={c.id} />
+      <SyncStatus key={c.version} subject={c.id} />
+      <RpConnections key={c.version} channelId={c.id} />
       <div className="management-footnote">
         {c.recovery.waitingFor || c.recovery.reason || "未归档"}
         {c.recovery.nextCheckAt &&

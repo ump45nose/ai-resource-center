@@ -1,30 +1,38 @@
 import { useState, type FormEvent } from "react";
 import { ArrowUpRight } from "lucide-react";
-import { api, errorText, saveError } from "./api";
+import { api, errorText, saveError, updatedText } from "./api";
 import { Button, Overlay } from "./components";
 import { usageLabels, lines, type Site } from "./data";
+import { useVersionChange } from "./hooks";
 import AccountEditor from "./AccountEditor";
 import ChannelEditor from "./ChannelEditor";
 
 export default function ManagementPanel({
   site,
+  channel,
   close,
   refresh,
   notify,
 }: {
   site: Site;
+  channel?: string;
   close: () => void;
   refresh: () => Promise<void>;
   notify: (s: string) => void;
 }) {
   const [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
-    [conflict, setConflict] = useState("");
+    [updated, setUpdated] = useState(false);
+  useVersionChange(site.version, () => {
+    setUpdated(!busy);
+    if (!busy) setError("");
+  });
   async function saveSite(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     setBusy(true);
     setError("");
+    setUpdated(false);
     try {
       await api(`/sites/${site.id}`, "PATCH", {
         version: site.version,
@@ -48,6 +56,11 @@ export default function ManagementPanel({
     <Overlay title={site.name} subtitle="管理站点与连接" drawer onClose={close}>
       <div className="overlay-body management-panel">
         <form className="form-stack" key={site.version} onSubmit={saveSite}>
+          {updated && (
+            <p className="quiet-notice" role="status">
+              {updatedText}
+            </p>
+          )}
           <div className="form-grid">
             <label>
               站点名称
@@ -111,10 +124,8 @@ export default function ManagementPanel({
           <h3>账号与权益</h3>
           {site.accounts.map((a) => (
             <AccountEditor
-              key={`${a.id}:${a.version}`}
+              key={a.id}
               account={a}
-              conflict={conflict === a.id}
-              setConflict={setConflict}
               refresh={refresh}
               notify={notify}
             />
@@ -127,11 +138,13 @@ export default function ManagementPanel({
           <NewChannel site={site} refresh={refresh} notify={notify} />
           {site.channels.map((c) => (
             <ChannelEditor
-              key={`${c.id}:${c.version}`}
+              key={c.id}
               channel={c}
               accounts={site.accounts}
-              conflict={conflict === c.id}
-              setConflict={setConflict}
+              defaultOpen={
+                channel ? c.id === channel : c.credentialStatus === "missing"
+              }
+              focused={c.id === channel}
               refresh={refresh}
               notify={notify}
             />

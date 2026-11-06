@@ -1,32 +1,34 @@
 import { useState, type FormEvent } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { api, conflictText, isVersionConflict, saveError } from "./api";
+import { api, saveError, updatedText } from "./api";
 import { Button } from "./components";
 import { amount, lines, type Account } from "./data";
+import { useVersionChange } from "./hooks";
 import SyncStatus from "./SyncStatus";
 
 export default function AccountEditor({
   account: a,
-  conflict,
-  setConflict,
   refresh,
   notify,
 }: {
   account: Account;
-  conflict: boolean;
-  setConflict: (id: string) => void;
   refresh: () => Promise<void>;
   notify: (s: string) => void;
 }) {
-  const [open, setOpen] = useState(conflict),
-    [error, setError] = useState(conflict ? conflictText : ""),
-    [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false),
+    [error, setError] = useState(""),
+    [busy, setBusy] = useState(false),
+    [updated, setUpdated] = useState(false);
+  useVersionChange(a.version, () => {
+    setUpdated(open && !busy);
+    if (!busy) setError("");
+  });
   async function save(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     setBusy(true);
     setError("");
-    setConflict("");
+    setUpdated(false);
     try {
       await api(`/accounts/${a.id}`, "PATCH", {
         version: a.version,
@@ -63,7 +65,6 @@ export default function AccountEditor({
       await refresh();
       notify("权益规则已保存");
     } catch (e) {
-      if (isVersionConflict(e)) setConflict(a.id);
       setError(await saveError(e, refresh));
     } finally {
       setBusy(false);
@@ -74,7 +75,10 @@ export default function AccountEditor({
       <button
         className="management-card-heading"
         aria-expanded={open}
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          setOpen(!open);
+          setUpdated(false);
+        }}
       >
         {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         <strong>{a.name}</strong>
@@ -82,7 +86,12 @@ export default function AccountEditor({
         <span className="text-link">编辑权益</span>
       </button>
       {open && (
-        <form className="form-stack" onSubmit={save}>
+        <form className="form-stack" key={a.version} onSubmit={save}>
+          {updated && (
+            <p className="quiet-notice" role="status">
+              {updatedText}
+            </p>
+          )}
           <div className="form-grid">
             <label>
               账号名称
@@ -214,7 +223,7 @@ export default function AccountEditor({
           </Button>
         </form>
       )}
-      <SyncStatus subject={a.id} />
+      <SyncStatus key={a.version} subject={a.id} />
     </article>
   );
 }

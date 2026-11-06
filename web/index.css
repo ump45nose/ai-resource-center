@@ -850,6 +850,11 @@ button {
   display: inline-flex;
 }
 .account-expansion {
+  display: grid;
+  grid-template-columns:
+    minmax(100px, 1fr) minmax(80px, 0.8fr) minmax(120px, 1.2fr)
+    auto;
+  column-gap: 10px;
   margin: 0 19px 16px 46px;
   border-radius: 7px;
   background: #f4f1e9;
@@ -857,6 +862,7 @@ button {
   padding: 5px 12px;
 }
 .account-row {
+  grid-column: 1 / -1;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -1186,6 +1192,7 @@ button {
   font-weight: 500;
   font-size: 12px;
   padding: 0;
+  text-align: left;
 }
 .table-title:hover {
   color: var(--clay);
@@ -1926,10 +1933,9 @@ button {
   align-items: center;
 }
 .channel-inline {
+  grid-column: 1 / -1;
   display: grid;
-  grid-template-columns:
-    minmax(100px, 1fr) minmax(80px, 0.8fr) minmax(120px, 1.2fr)
-    auto;
+  grid-template-columns: subgrid;
   gap: 10px;
   align-items: center;
   padding: 12px 0;
@@ -1941,6 +1947,7 @@ button {
   color: var(--muted);
 }
 .channel-inline .badge {
+  justify-self: start;
   white-space: normal;
 }
 .preserve-lines {
@@ -2053,7 +2060,7 @@ button {
   .login-card {
     padding: 26px;
   }
-  .channel-inline {
+  .account-expansion {
     grid-template-columns: minmax(0, 1fr) auto;
   }
   .channel-inline .inline-tags {
@@ -2285,11 +2292,10 @@ button {
   color: var(--muted);
   font-size: 12px;
 }
-.form-stack label.check-line {
+.form-stack
+  label:not(.scan-target):not(.filter-search):has(> input[type="checkbox"]) {
   flex-direction: row;
   align-items: center;
-  justify-content: flex-start;
-  gap: 10px;
 }
 .task-catalog {
   max-height: 260px;

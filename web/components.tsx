@@ -1,11 +1,50 @@
 import {
   useEffect,
+  useId,
   useRef,
+  useSyncExternalStore,
   type ButtonHTMLAttributes,
   type ReactNode,
 } from "react";
-import { ArrowRight, Search, X, type LucideIcon } from "lucide-react";
+import { ArrowRight, Check, Search, X, type LucideIcon } from "lucide-react";
 import type { Tone } from "./data";
+
+// A modal dialog makes the rest of the page inert, so the toast renders
+// inside the topmost open Overlay.
+const listeners = new Set<() => void>();
+const emit = () => listeners.forEach((listener) => listener());
+const subscribe = (listener: () => void) => {
+  listeners.add(listener);
+  return () => void listeners.delete(listener);
+};
+const openDialogs: string[] = [];
+const topDialog = () => openDialogs.at(-1) ?? null;
+let toastText = "";
+let toastTimer: ReturnType<typeof setTimeout> | undefined;
+const currentToast = () => toastText;
+export function showToast(text: string) {
+  toastText = text;
+  clearTimeout(toastTimer);
+  if (text) toastTimer = setTimeout(() => showToast(""), 5000);
+  emit();
+}
+export function ToastRegion({ owner = null }: { owner?: string | null }) {
+  const text = useSyncExternalStore(subscribe, currentToast);
+  const active = useSyncExternalStore(subscribe, topDialog) === owner;
+  return (
+    <div role="status">
+      {active && text && (
+        <div className="toast">
+          <Check size={16} />
+          <span>{text}</span>
+          <button aria-label="关闭提示" onClick={() => showToast("")}>
+            <X size={14} />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function Button({
   children,
@@ -149,13 +188,18 @@ export function Overlay({
   drawer?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const id = useId();
   useEffect(() => {
     const dialog = ref.current!;
     dialog.showModal();
     document.body.style.overflow = "hidden";
+    openDialogs.push(id);
+    emit();
     return () => {
       dialog.close();
-      document.body.style.overflow = "";
+      openDialogs.splice(openDialogs.indexOf(id), 1);
+      emit();
+      if (!openDialogs.length) document.body.style.overflow = "";
     };
   }, []);
   return (
@@ -188,6 +232,7 @@ export function Overlay({
         </header>
         {children}
       </div>
+      <ToastRegion owner={id} />
     </dialog>
   );
 }

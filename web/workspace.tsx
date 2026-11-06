@@ -8,7 +8,7 @@ export type Workspace = {
   meta: Meta | null;
   query: string;
   navigate: (page: Page) => void;
-  inspectSite: (id: string) => void;
+  inspectSite: (id: string, channel?: string) => void;
   inspectModel: (id: string) => void;
   configureSource: (source?: Source) => void;
   sourceAction: (

@@ -82,32 +82,24 @@ export default function MaintenanceSettings({
         <div className="form-columns">
           {(
             [
-              ["normalHours", "正常渠道 / 小时"],
-              ["maintenanceHours", "维护渠道 / 小时"],
-              ["closedHours", "关闭网站 / 小时"],
-              ["keyRetryHours", "key 复查 / 小时"],
-              ["archiveAfterDays", "持续故障归档 / 天"],
-              ["archiveReviewHours", "归档后复查 / 小时"],
-              ["newModelsHours", "模型复验 / 小时"],
-              ["maxCandidates", "每渠道每轮候选"],
-              ["maxEvaluationsPerDay", "每日任务次数上限"],
-              ["smokeMaxTokens", "小任务输出 Token 上限"],
+              ["normalHours", "正常渠道 / 小时", 1],
+              ["maintenanceHours", "维护渠道 / 小时", 1],
+              ["closedHours", "关闭网站 / 小时", 1],
+              ["keyRetryHours", "key 复查 / 小时", 1],
+              ["archiveAfterDays", "持续故障归档 / 天", 1, 365],
+              ["archiveReviewHours", "归档后复查 / 小时", 24, 8760],
+              ["newModelsHours", "模型复验 / 小时", 1],
+              ["maxCandidates", "每渠道每轮候选", 1, 20],
+              ["maxEvaluationsPerDay", "每日任务次数上限", 1, 500],
+              ["smokeMaxTokens", "小任务输出 Token 上限", 256, 4096],
             ] as const
-          ).map(([key, label]) => (
+          ).map(([key, label, min, max]) => (
             <label key={key}>
               {label}
               <input
                 type="number"
-                min={key === "smokeMaxTokens" ? 256 : key === "archiveReviewHours" ? 24 : 1}
-                max={
-                  key === "maxCandidates"
-                    ? 20
-                    : key === "archiveAfterDays" ? 365
-                    : key === "archiveReviewHours" ? 8760
-                    : key === "smokeMaxTokens"
-                      ? 4096
-                      : undefined
-                }
+                min={min}
+                max={max}
                 value={p[key]}
                 onChange={(e) => setP({ ...p, [key]: Number(e.target.value) })}
                 required
