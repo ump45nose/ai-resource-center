@@ -5729,6 +5729,19 @@
                         "supportsRunConfig": {
                           "type": "boolean"
                         },
+                        "requiresBookmarkWork": {
+                          "type": "boolean"
+                        },
+                        "tags": {
+                          "maxItems": 1,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "channel_test"
+                            ]
+                          }
+                        },
                         "supportsResult": {
                           "type": "boolean"
                         },
@@ -5737,6 +5750,16 @@
                         },
                         "supportsScheduledRunConfig": {
                           "type": "boolean"
+                        },
+                        "requiredCapabilities": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "vision",
+                              "tool_calling"
+                            ]
+                          }
                         },
                         "purpose": {
                           "type": "string",
@@ -5802,6 +5825,671 @@
           },
           "403": {
             "description": "来源不匹配"
+          }
+        }
+      }
+    },
+    "/api/v2/bookmark-imports": {
+      "get": {
+        "operationId": "resource_list_bookmark_imports",
+        "summary": "书签新增渠道与自动导入失败队列",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "书签新增渠道与自动导入失败队列",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误"
+          },
+          "401": {
+            "description": "未登录"
+          },
+          "403": {
+            "description": "权限不足"
+          },
+          "409": {
+            "description": "版本或操作范围冲突"
+          }
+        }
+      }
+    },
+    "/api/v2/bookmark-imports/{id}/retry": {
+      "post": {
+        "operationId": "resource_retry_bookmark_import",
+        "summary": "重试新增书签的原生导入",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "重试新增书签的原生导入",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误"
+          },
+          "401": {
+            "description": "未登录"
+          },
+          "403": {
+            "description": "权限不足"
+          },
+          "409": {
+            "description": "版本或操作范围冲突"
+          }
+        }
+      }
+    },
+    "/api/v2/cron/tasks/{id}": {
+      "patch": {
+        "operationId": "resource_tag_task",
+        "summary": "标记可用于渠道验证的 cron",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "version": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "changes": {
+                    "type": "object",
+                    "properties": {
+                      "tags": {
+                        "maxItems": 1,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "channel_test"
+                          ]
+                        }
+                      }
+                    },
+                    "required": [
+                      "tags"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "version",
+                  "changes"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "标记可用于渠道验证的 cron",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误"
+          },
+          "401": {
+            "description": "未登录"
+          },
+          "403": {
+            "description": "权限不足"
+          },
+          "409": {
+            "description": "版本或操作范围冲突"
+          }
+        }
+      }
+    },
+    "/api/v2/cron/pools": {
+      "get": {
+        "operationId": "resource_list_channel_pools",
+        "summary": "cron 可绑定的渠道池",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "cron 可绑定的渠道池",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误"
+          },
+          "401": {
+            "description": "未登录"
+          },
+          "403": {
+            "description": "权限不足"
+          },
+          "409": {
+            "description": "版本或操作范围冲突"
+          }
+        }
+      },
+      "post": {
+        "operationId": "resource_create_channel_pool",
+        "summary": "创建按优先级选择模型的渠道池",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "data": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 100
+                      },
+                      "enabled": {
+                        "default": true,
+                        "type": "boolean"
+                      },
+                      "scope": {
+                        "default": "all_eligible",
+                        "type": "string",
+                        "enum": [
+                          "all_eligible",
+                          "selected"
+                        ]
+                      },
+                      "channelIds": {
+                        "default": [],
+                        "maxItems": 1000,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "channelPriorities": {
+                        "default": {},
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {
+                          "type": "integer",
+                          "minimum": -100000,
+                          "maximum": 100000
+                        }
+                      },
+                      "modelPriorities": {
+                        "default": {},
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {
+                          "type": "integer",
+                          "minimum": -100000,
+                          "maximum": 100000
+                        }
+                      },
+                      "allowUnverified": {
+                        "default": true,
+                        "type": "boolean"
+                      },
+                      "cooldownMinutes": {
+                        "default": 30,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1440
+                      },
+                      "maxAttempts": {
+                        "default": 6,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 24
+                      }
+                    },
+                    "required": [
+                      "name"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "data"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "创建按优先级选择模型的渠道池",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误"
+          },
+          "401": {
+            "description": "未登录"
+          },
+          "403": {
+            "description": "权限不足"
+          },
+          "409": {
+            "description": "版本或操作范围冲突"
+          }
+        }
+      }
+    },
+    "/api/v2/cron/pools/{id}": {
+      "patch": {
+        "operationId": "resource_update_channel_pool",
+        "summary": "修改渠道池范围、优先级和候选校验策略",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "version": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "changes": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 100
+                      },
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "scope": {
+                        "type": "string",
+                        "enum": [
+                          "all_eligible",
+                          "selected"
+                        ]
+                      },
+                      "channelIds": {
+                        "maxItems": 1000,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "channelPriorities": {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {
+                          "type": "integer",
+                          "minimum": -100000,
+                          "maximum": 100000
+                        }
+                      },
+                      "modelPriorities": {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {
+                          "type": "integer",
+                          "minimum": -100000,
+                          "maximum": 100000
+                        }
+                      },
+                      "allowUnverified": {
+                        "type": "boolean"
+                      },
+                      "cooldownMinutes": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1440
+                      },
+                      "maxAttempts": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 24
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "version",
+                  "changes"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "修改渠道池范围、优先级和候选校验策略",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误"
+          },
+          "401": {
+            "description": "未登录"
+          },
+          "403": {
+            "description": "权限不足"
+          },
+          "409": {
+            "description": "版本或操作范围冲突"
+          }
+        }
+      }
+    },
+    "/api/v2/cron/pools/{id}/candidates": {
+      "get": {
+        "operationId": "resource_channel_pool_candidates",
+        "summary": "预览指定任务的渠道池候选及优先级，不发起调用",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "taskId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "预览指定任务的渠道池候选及优先级，不发起调用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误"
+          },
+          "401": {
+            "description": "未登录"
+          },
+          "403": {
+            "description": "权限不足"
+          },
+          "409": {
+            "description": "版本或操作范围冲突"
           }
         }
       }
@@ -5916,6 +6604,17 @@
                         ],
                         "additionalProperties": false
                       },
+                      "poolId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
                       "channelId": {
                         "type": "string",
                         "minLength": 1
@@ -5955,9 +6654,7 @@
                       }
                     },
                     "required": [
-                      "taskRef",
-                      "channelId",
-                      "modelId"
+                      "taskRef"
                     ],
                     "additionalProperties": false
                   }
@@ -6124,6 +6821,17 @@
                           "id"
                         ],
                         "additionalProperties": false
+                      },
+                      "poolId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
                       },
                       "channelId": {
                         "type": "string",
@@ -7346,6 +8054,10 @@
                               "format": "date-time",
                               "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
                             },
+                            "businessDate": {
+                              "type": "string",
+                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                            },
                             "supported": {
                               "type": "boolean"
                             },
@@ -7804,7 +8516,8 @@
                             "需登录",
                             "需人工操作",
                             "未执行",
-                            "无法签到"
+                            "无法签到",
+                            "无需签到"
                           ]
                         },
                         "reason": {
@@ -7920,6 +8633,19 @@
                       "preview",
                       "scheduled"
                     ]
+                  },
+                  "excludedOfferings": {
+                    "maxItems": 24,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "poolRunId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
                   }
                 },
                 "required": [

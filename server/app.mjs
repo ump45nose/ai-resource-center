@@ -1,4 +1,10 @@
 import Fastify from "fastify";
+import {
+  hasBookmarkWork,
+  BookmarkImports,
+  bookmarkInventorySchema,
+  bookmarkOutcomeSchema,
+} from "./bookmark-imports.mjs";
 import { Distribution } from "./distribution.mjs";
 import { migrateChannels, migrateUsage } from "./migrations.mjs";
 import { migrateHubKeys } from "./hub-keys.mjs";
@@ -115,6 +121,7 @@ export async function createApp({
   sources.onInventory = (id, channels, startedAt) =>
     distribution.observeNewApi(id, channels, startedAt);
   const context = {
+    bookmarks: new BookmarkImports(store, resources),
     rp: new RpSync(store, resources),
     distribution,
     store,
@@ -215,7 +222,8 @@ export async function createApp({
     if (
       (input.role === "rp" ||
         (input.role === "connector" && input.target === "sillytavern")) &&
-      !input.channelIds?.length && !(input.rpInstanceId && input.rpUserId)
+      !input.channelIds?.length &&
+      !(input.rpInstanceId && input.rpUserId)
     )
       throw new Problem(400, "酒馆凭据必须绑定具体 RP 连接");
     if (input.role === "connector" && !input.target)
@@ -233,10 +241,17 @@ export async function createApp({
   });
   app.get("/api/v2/connector/jobs", (req, reply) => {
     reply.header("Cache-Control", "no-store");
-    return req.auth.scope?.rpInstanceId ? context.rp.claim(req.auth) : distribution.claim(req.auth);
+    return req.auth.scope?.rpInstanceId
+      ? context.rp.claim(req.auth)
+      : distribution.claim(req.auth);
   });
   app.post("/api/v2/connector/receipts", (req) =>
-    req.auth.scope?.rpInstanceId ? context.rp.receipt(req.auth, connectorReceiptSchema.parse(req.body)) : distribution.acknowledge(req.auth, connectorReceiptSchema.parse(req.body)),
+    req.auth.scope?.rpInstanceId
+      ? context.rp.receipt(req.auth, connectorReceiptSchema.parse(req.body))
+      : distribution.acknowledge(
+          req.auth,
+          connectorReceiptSchema.parse(req.body),
+        ),
   );
   app.post("/mcp", async (req, reply) => {
     const response = await mcpRequest(caps, req.auth, req);
@@ -290,11 +305,81 @@ export async function createApp({
       ),
     );
   });
+  const bookmarkBrowser = (req) => {
+    if (
+      req.auth.role !== "connector" ||
+      req.auth.scope.target !== "chrome-bookmarks"
+    )
+      throw new Problem(403, "需要书签执行凭据");
+    return req.auth.scope.sourceId;
+  };
+  app.post("/api/v2/ingest/bookmarks", (req) =>
+    context.bookmarks.ingest(
+      bookmarkBrowser(req),
+      bookmarkInventorySchema.parse(req.body),
+    ),
+  );
+  app.get("/api/v2/bookmark-imports/browser-jobs", (req) => {
+    bookmarkBrowser(req);
+    return context.bookmarks.jobs();
+  });
+  app.post("/api/v2/bookmark-imports/:id/browser-result", (req) => {
+    bookmarkBrowser(req);
+    return context.bookmarks.outcome(
+      req.params.id,
+      bookmarkOutcomeSchema.parse(req.body),
+    );
+  });
+  app.get("/api/v2/cron/bookmark-imports/available", (req) => {
+    sourceIdentity(req.auth, "cron");
+    return { available: hasBookmarkWork(store) };
+  });
+  app.get("/api/v2/cron/bookmark-imports/:id", (req) => {
+    const source = sourceIdentity(req.auth, "cron");
+    const job = store.require("bookmark-import", req.params.id);
+    if (job.workerSource !== source)
+      throw new Problem(403, "任务不属于本执行器");
+    return publicValue(job);
+  });
+  app.post("/api/v2/bookmark-imports/claim", (req) => {
+    const source = sourceIdentity(req.auth, "cron");
+    const { runId, limit } = z
+      .object({
+        runId: z.string().min(1),
+        limit: z.number().int().min(1).max(5).default(3),
+      })
+      .strict()
+      .parse(req.body);
+    return context.bookmarks.claim(source, runId, limit);
+  });
+  app.post("/api/v2/bookmark-imports/:id/result", (req) => {
+    const source = sourceIdentity(req.auth, "cron");
+    const { runId, ...changes } = z
+      .object({
+        runId: z.string(),
+        state: z.enum([
+          "waiting_login",
+          "waiting_security",
+          "unsupported",
+          "failed",
+          "needs_model",
+        ]),
+        reason: z.string().max(500),
+        recipe: z.record(z.string(), z.unknown()).optional(),
+        api: z
+          .object({ available: z.boolean(), reason: z.string().optional() })
+          .optional(),
+      })
+      .strict()
+      .parse(req.body);
+    return context.bookmarks.finish(req.params.id, source, runId, changes);
+  });
   app.post("/api/v2/cron/tasks", (req) => {
     const source = sourceIdentity(req.auth, "cron");
     const input = taskCatalogSchema.parse(req.body);
     for (const task of input.tasks)
       store.put("task", {
+        ...store.get("task", `${source}:${task.id}`),
         ...task,
         id: `${source}:${task.id}`,
         externalId: task.id,

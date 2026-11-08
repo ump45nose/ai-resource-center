@@ -38,6 +38,7 @@ export const accountEvent = z
         "需人工操作",
         "未执行",
         "无法签到",
+        "无需签到",
       ])
       .optional(),
     reason: z.string().optional(),

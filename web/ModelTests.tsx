@@ -25,11 +25,13 @@ export default function ModelTests({
     enabled: boolean;
     supportsRunConfig: boolean;
     supportsResult: boolean;
+    supportsPreview?: boolean;
     supportsScheduledRunConfig?: boolean;
+    requiredCapabilities?: string[];
   };
   const [tasks, setTasks] = useState<Task[]>([]),
-    [taskId, setTaskId] = useState(""),
-    [validationOnly, setValidationOnly] = useState(true);
+    [taskId, setTaskId] = useState("");
+  const validationOnly = true;
   useEffect(() => {
     void allPages<Task>("/cron/tasks")
       .then(setTasks)
@@ -112,28 +114,19 @@ export default function ModelTests({
         <label>
           验证任务
           <select value={taskId} onChange={(e) => setTaskId(e.target.value)}>
-            <option value="">使用已绑定 cron，否则用小任务</option>
+            <option value="">选择预览任务，否则用小任务</option>
             {tasks
               .filter(
-                (t) => t.enabled && t.supportsRunConfig && t.supportsResult,
+                (t) => t.enabled && t.supportsRunConfig && t.supportsResult && t.supportsPreview !== false,
               )
               .map((t) => (
                 <option key={t.id} value={t.id}>
-                  {t.name}
+                  {t.name}{t.requiredCapabilities?.length ? " · 截图与工具调用" : ""}
                 </option>
               ))}
           </select>
         </label>
-        {taskId && (
-          <label className="toggle-field">
-            <input
-              type="checkbox"
-              checked={validationOnly}
-              onChange={(e) => setValidationOnly(e.target.checked)}
-            />
-            仅用于验证预览，不改正式任务配置和投递
-          </label>
-        )}
+        <p className="muted">正常定时任务请在“渠道池与任务”中绑定渠道池；此处仅安排单模型验证预览。</p>
         {!tasks.some(
           (t) => t.enabled && t.supportsRunConfig && t.supportsResult,
         ) && (

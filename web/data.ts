@@ -128,6 +128,7 @@ export type HistoricalEvaluation = {
   countsTowardCurrentGrade: false;
 };
 export type Channel = {
+  accessMode?: "web" | "api";
   id: string;
   version: number;
   name: string;
@@ -153,7 +154,7 @@ export type Channel = {
   order?: number;
   recoveryPolicy?: { enabled: boolean };
   credentialStatus: string;
-  synchronization?: { target: string; state: string }[];
+  synchronization?: { target: string; state: string; reason?: string | null }[];
   runtimeIssue?: { type: "rate" | "quota"; at: string; reason: string } | null;
   mode?: "auto" | "manual";
   management?: { state?: string; prohibited?: boolean; fixed?: boolean };
@@ -398,8 +399,10 @@ export type MaintenanceSummary = {
     id: string;
     version: number;
     taskName: string;
-    channelId: string;
-    modelId: string;
+    channelId?: string;
+    modelId?: string;
+    poolId?: string;
+    poolName?: string;
     enabled: boolean;
     validationOnly?: boolean;
   }[];
@@ -481,13 +484,17 @@ export const syncStateLabels: Record<string, string> = {
   not_applicable: "无需接入",
 };
 export function channelStatus(c: Channel): { label: string; tone: Tone } {
-  if (c.recovery.pending) return { label: c.recovery.reason, tone: "amber" };
+  if (c.recovery.pending && c.recovery.reason)
+    return { label: c.recovery.reason, tone: "amber" };
   if (c.management?.state === "paused")
     return { label: "人工暂停", tone: "neutral" };
+  if (c.accessMode === "web") return { label: "网页使用", tone: "neutral" };
   if (c.credentialStatus === "missing")
     return { label: "待补 key", tone: "amber" };
   if (c.usage !== "rp") {
     const sync = c.synchronization?.find((s) => s.target === "newapi");
+    if (sync?.state === "waiting" && sync.reason?.includes("等待选定模型"))
+      return { label: "New API 已建档 · 待选模型", tone: "amber" };
     if (
       sync &&
       !["applied", "not_applicable"].includes(sync.state) &&

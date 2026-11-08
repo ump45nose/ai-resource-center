@@ -9,7 +9,14 @@ import { currentBalance, entitlement } from "./maintenance-policy.mjs";
 import { archiveChannel } from "./channel-health.mjs";
 import { observeSuccess } from "./failure-window.mjs";
 
-function checkinAccount(store, account) {
+export function checkinAccount(store, account) {
+  const own = account.sourceObservation;
+  // A verified native method supersedes the old browser-only executor;
+  // keep its association so historical rewards still belong to this account.
+  if (own?.source === "all-api-hub" && own.enabled !== false &&
+      own.checkin?.enabled === true && own.checkin.configured === true &&
+      own.checkin.supported === true && own.checkin.availability === "enabled")
+    return account;
   return account.checkinAccountId
     ? store.require("account", account.checkinAccountId)
     : account;

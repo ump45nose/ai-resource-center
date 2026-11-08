@@ -21,6 +21,7 @@ import {
 import { useWorkspace } from "../workspace";
 import MaintenanceSettings from "../MaintenanceSettings";
 import ModelTests from "../ModelTests";
+import ChannelPools from "./ChannelPools";
 
 const stateLabel = (state?: string) =>
   ({
@@ -41,6 +42,7 @@ export default function Scans() {
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const [settings, setSettings] = useState(false),
+    [poolSettings, setPoolSettings] = useState(false),
     [modelChannel, setModelChannel] = useState<string | null>(null);
   const entries = sites.flatMap((site) =>
     site.channels.map((channel) => ({ site, channel })),
@@ -104,6 +106,7 @@ export default function Scans() {
         <div>
           <p>扫描目录与站方表现，再用任务验证；通过后同步 New API。</p>
         </div>
+        <Button onClick={() => setPoolSettings(true)}>渠道池与任务</Button>
         <Button onClick={() => setSettings(true)} disabled={!summary}>
           <Settings2 size={15} />
           维护设置
@@ -379,7 +382,7 @@ export default function Scans() {
         <section className="maintenance-history">
           <SectionHeading
             title="任务绑定"
-            meta="使用 fn 原任务；验证绑定不更改正式模型或投递"
+            meta="正常任务绑定渠道池，按优先级自动选型；验证预览保留独立绑定"
           />
           <div className="maintenance-log">
             {summary.bindings.map((b) => (
@@ -390,11 +393,10 @@ export default function Scans() {
                 <span>
                   <strong>{b.taskName}</strong>
                   <small>
-                    {
+                    {b.poolId ? `${b.poolName || "渠道池"} · 按优先级自动选型` : <>{
                       entries.find((e) => e.channel.id === b.channelId)?.channel
                         .name
-                    }{" "}
-                    · {b.modelId} ·{" "}
+                    } · {b.modelId}</>} ·{" "}
                     {b.validationOnly ? "仅用于验证预览" : "正常任务绑定"}
                   </small>
                 </span>
@@ -498,6 +500,9 @@ export default function Scans() {
           </div>
         </section>
       )}
+      {poolSettings && <ChannelPools close={() => setPoolSettings(false)} saved={async () => {
+        await load(); await refresh(); notify("渠道池配置已保存");
+      }} />}
       {settings && summary && (
         <MaintenanceSettings
           summary={summary}

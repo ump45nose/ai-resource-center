@@ -13,6 +13,7 @@ import {
   passthroughSetting,
   findByTag,
 } from "./newapi-channel.mjs";
+import { hash } from "./store.mjs";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { canonicalApi } from "./domain.mjs";
@@ -200,8 +201,8 @@ export class Gateway {
         applied: snapshot(after),
       });
     }
-    const identityId = `evaluation:${runId}`,
-      existing = this.store.get("identity", identityId);
+    const identityId = `evaluation:${runId}`;
+    let existing = this.store.get("identity", identityId);
     if (existing?.credentialId)
       return {
         baseUrl: `${source.url.replace(/\/$/, "")}/v1`,
@@ -214,7 +215,16 @@ export class Gateway {
       !this.distribution?.config("newapi").enabled
         ? staged.modelId
         : staged.evaluationModelId;
-    const name = existing?.pendingName || `arc2-eval-${runId}`;
+    // New API rejects token names longer than 50 bytes, including cron source IDs.
+    if (existing?.pendingName?.length > 50) {
+      const previous = await this.sources.pages(source, "/api/token/search", {
+        keyword: existing.pendingName,
+      });
+      if (!previous.some((t) => t.name === existing.pendingName))
+        existing = null;
+    }
+    const name =
+      existing?.pendingName || `arc2-eval-${hash(runId).slice(0, 24)}`;
     if (!existing) {
       this.store.put("identity", {
         id: identityId,

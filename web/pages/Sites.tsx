@@ -63,7 +63,7 @@ function KeyCell({ site, onEdit }: { site: Site; onEdit: () => void }) {
             {site.channels.length > 1 && (
               <span title={channel.name}>{channel.name}</span>
             )}
-            {channel.credentialStatus === "present" ? (
+            {channel.accessMode === "web" ? <span className="muted">网页账号</span> : channel.credentialStatus === "present" ? (
               <button
                 className="copy-key"
                 onClick={() => copy(channel.id)}

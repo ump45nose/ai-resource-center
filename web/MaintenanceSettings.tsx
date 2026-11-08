@@ -18,10 +18,13 @@ export default function MaintenanceSettings({
   const [tasks, setTasks] = useState<
     {
       id: string;
+      version: number;
+      tags?: string[];
       name: string;
       enabled: boolean;
       supportsRunConfig: boolean;
       supportsResult: boolean;
+      requiredCapabilities?: string[];
     }[]
   >([]);
   useEffect(() => {
@@ -148,7 +151,11 @@ export default function MaintenanceSettings({
           <div className="task-catalog">
             {tasks.map((t) => (
               <div key={t.id}>
-                <span>{t.name}</span>
+                <span>{t.name}{t.requiredCapabilities?.length ? " · 截图与工具调用" : ""}</span>
+                <label className="check-line"><input type="checkbox" checked={t.tags?.includes("channel_test")||false}
+                  onChange={()=>void api(`/cron/tasks/${encodeURIComponent(t.id)}`,"PATCH",{version:t.version,changes:{tags:t.tags?.includes("channel_test")?[]:["channel_test"]}})
+                    .then(()=>allPages<(typeof tasks)[number]>("/cron/tasks")).then(setTasks).catch(e=>setError(errorText(e)))}/>
+                  可用于渠道测试</label>
                 <Badge>
                   {!t.enabled
                     ? "原任务暂停"

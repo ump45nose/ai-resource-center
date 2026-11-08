@@ -160,7 +160,7 @@ export default function ChannelEditor({
         <strong>{c.name}</strong>
         <Badge>{usageLabels[c.usage]}</Badge>
         <Badge tone={c.credentialStatus === "missing" ? "amber" : "neutral"}>
-          {c.credentialStatus === "missing" ? "待补 key" : "凭据已关联"}
+          {c.accessMode === "web" ? "网页账号，调用 API 未接入" : c.credentialStatus === "missing" ? "待补 key" : "凭据已关联"}
         </Badge>
         <span className="text-link">编辑</span>
       </button>

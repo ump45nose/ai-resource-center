@@ -14,6 +14,7 @@ import { paginate, policies } from "./resources.mjs";
 import { listCheckins } from "./checkins.mjs";
 import { history } from "./history.mjs";
 import { rpEditSchema } from "./rp-sync.mjs";
+import { poolSchema, patchSchema, validatePool, poolCandidates, normalizeBinding } from "./channel-pools.mjs";
 
 const text = z.string().min(1),
   url = z
@@ -179,6 +180,7 @@ export function capabilities({
   maintenance,
   distribution,
   rp,
+  bookmarks,
 }) {
   const all = [];
   const add = (
@@ -244,10 +246,17 @@ export function capabilities({
     () => resources.overview(),
   );
   add(
-    "list_checkins", "GET", "/checkins",
+    "list_checkins",
+    "GET",
+    "/checkins",
     "按业务日期和受益账号归并签到记录，保留最新尝试和已确认成果",
-    { cursor: listing.cursor, limit: listing.limit, siteId: text.optional(),
-      start_date: z.string().optional(), end_date: z.string().optional() },
+    {
+      cursor: listing.cursor,
+      limit: listing.limit,
+      siteId: text.optional(),
+      start_date: z.string().optional(),
+      end_date: z.string().optional(),
+    },
     (query) => listCheckins(store, query),
   );
   add(
@@ -871,6 +880,72 @@ export function capabilities({
     (a) => paginate(store.list("task"), a),
   );
   add(
+    "list_bookmark_imports",
+    "GET",
+    "/bookmark-imports",
+    "书签新增渠道与自动导入失败队列",
+    listing,
+    (a) => paginate(store.list("bookmark-import").reverse(), a),
+  );
+  add(
+    "retry_bookmark_import",
+    "POST",
+    "/bookmark-imports/:id/retry",
+    "重试新增书签的原生导入",
+    { id: text },
+    ({ id }) => {
+      const job = store.require("bookmark-import", id);
+      if (job.state === "model_running")
+        throw new Problem(409, "模型任务正在执行，请等待本轮结果");
+      return store.put("bookmark-import", {
+        ...job,
+        state: job.recipe ? "recipe_ready" : "pending_native",
+        reason: null,
+        nextAttemptAt: null,
+        version: job.version + 1,
+      });
+    },
+    true,
+  );
+  add(
+    "tag_task",
+    "PATCH",
+    "/cron/tasks/:id",
+    "标记可用于渠道验证的 cron",
+    {
+      id: text,
+      version,
+      changes: z
+        .object({ tags: z.array(z.enum(["channel_test"])).max(1) })
+        .strict(),
+    },
+    ({ id, version, changes }) => store.update("task", id, version, changes),
+    true,
+  );
+  add(
+    "list_channel_pools", "GET", "/cron/pools", "cron 可绑定的渠道池", listing,
+    a => paginate(store.list("channelPool"), a),
+  );
+  add(
+    "create_channel_pool", "POST", "/cron/pools", "创建按优先级选择模型的渠道池",
+    { data: poolSchema }, ({ data }) => store.put("channelPool", {
+      id: randomUUID(), ...validatePool(store, data),
+    }), true,
+  );
+  add(
+    "update_channel_pool", "PATCH", "/cron/pools/:id", "修改渠道池范围、优先级和候选校验策略",
+    { id: text, version, changes: patchSchema(poolSchema) }, ({ id, version, changes }) => {
+      const next = { ...store.require("channelPool", id), ...changes };
+      validatePool(store, next);
+      return store.update("channelPool", id, version, changes);
+    }, true,
+  );
+  add(
+    "channel_pool_candidates", "GET", "/cron/pools/:id/candidates", "预览指定任务的渠道池候选及优先级，不发起调用",
+    { id: text, source: text, taskId: text, ...listing }, ({ id, source, taskId, ...page }) =>
+      paginate(poolCandidates(store, store.require("channelPool", id), evaluations.task({ source, id: taskId })), page),
+  );
+  add(
     "list_bindings",
     "GET",
     "/cron/bindings",
@@ -886,42 +961,49 @@ export function capabilities({
     listing,
     (a) => paginate(store.list("run").reverse(), a),
   );
-  const bindingFields = {
-    taskRef,
-    channelId: text,
-    modelId: text,
-    enabled: z.boolean(),
-    unavailable: z.enum(["original", "skip"]),
-    capabilityClass: z.enum(["strong", "execution", "unclassified"]),
-    discoverNewModels: z.boolean(),
-    validationOnly: z.boolean(),
-  };
   const binding = z
     .object({
-      ...bindingFields,
-      enabled: bindingFields.enabled.default(true),
-      unavailable: bindingFields.unavailable.default("original"),
-      capabilityClass: bindingFields.capabilityClass.default("unclassified"),
-      discoverNewModels: bindingFields.discoverNewModels.default(false),
-      validationOnly: bindingFields.validationOnly.default(false),
+      taskRef,
+      poolId: text.nullable().optional(),
+      channelId: text.optional(),
+      modelId: text.optional(),
+      enabled: z.boolean().default(true),
+      unavailable: z.enum(["original", "skip"]).default("original"),
+      capabilityClass: z
+        .enum(["strong", "execution", "unclassified"])
+        .default("unclassified"),
+      discoverNewModels: z.boolean().default(false),
+      validationOnly: z.boolean().default(false),
     })
     .strict();
-  const checkBinding = (b) => {
-    const task = evaluations.task(b.taskRef);
+  const checkBinding = (raw, creating = false) => {
+    if (raw.poolId && (raw.channelId || raw.modelId))
+      throw new Problem(400, "渠道池绑定不固定渠道或模型");
+    const task = evaluations.task(raw.taskRef);
     if (
-      b.enabled &&
+      raw.enabled &&
       (!task.enabled || !task.supportsRunConfig || !task.supportsResult)
     )
       throw new Problem(409, "任务尚未适配或原任务暂停，请先保存为停用绑定");
     if (
-      b.enabled &&
-      !b.validationOnly &&
+      raw.enabled &&
+      raw.validationOnly &&
+      task.supportsPreview === false
+    )
+      throw new Problem(409, "该任务不支持额外预览，请选择正常定时运行");
+    if (
+      raw.enabled &&
+      !raw.validationOnly &&
       task.supportsScheduledRunConfig === false
     )
       throw new Problem(409, "该任务目前仅支持验证预览，不能绑定正式运行");
-    const blocked = taskBlock(store.require("channel", b.channelId), task);
-    if (blocked) throw new Problem(409, blocked);
-    evaluations.offering(b.channelId, b.modelId);
+    const data = normalizeBinding(store, raw, { creating });
+    if (!data.poolId) {
+      const blocked = taskBlock(store.require("channel", data.channelId), task);
+      if (blocked) throw new Problem(409, blocked);
+      evaluations.offering(data.channelId, data.modelId);
+    }
+    return data;
   };
   add(
     "create_binding",
@@ -929,17 +1011,20 @@ export function capabilities({
     "/cron/bindings",
     "绑定已有任务，不运行或恢复任务",
     { data: binding },
-    ({ data }) => {
-      checkBinding(data);
+    ({ data: raw }) => {
+      const data = checkBinding(raw, true);
       const existing = store
         .list("binding")
         .find(
           (b) =>
-            b.channelId === data.channelId &&
-            b.modelId === data.modelId &&
             b.taskRef.source === data.taskRef.source &&
             b.taskRef.id === data.taskRef.id &&
-            !!b.validationOnly === data.validationOnly,
+            !!b.validationOnly === data.validationOnly &&
+            (data.poolId
+              ? true
+              : !b.poolId &&
+                b.channelId === data.channelId &&
+                b.modelId === data.modelId),
         );
       return existing
         ? store.update("binding", existing.id, existing.version, data)
@@ -952,10 +1037,10 @@ export function capabilities({
     "PATCH",
     "/cron/bindings/:id",
     "修改任务资源绑定，保留原计划",
-    { id: text, version, changes: z.object(bindingFields).partial().strict() },
+    { id: text, version, changes: patchSchema(binding) },
     ({ id, version, changes }) => {
-      checkBinding({ ...store.require("binding", id), ...changes });
-      return store.update("binding", id, version, changes);
+      const next = checkBinding({ ...store.require("binding", id), ...changes });
+      return store.update("binding", id, version, next);
     },
     true,
   );

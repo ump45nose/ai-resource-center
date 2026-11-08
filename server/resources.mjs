@@ -525,13 +525,16 @@ export class Resources {
           recovery.reason ||
           archiveReasons.map((r) => archiveLabels[r]).join("、"),
       },
-      credentialStatus: c.credentialId
-        ? "present"
-        : c.nativeCredentialRef
-          ? "native_only"
-          : c.gateway && c.gateway.sourceId !== "cpa"
-            ? "gateway_only"
-            : "missing",
+      credentialStatus:
+        c.accessMode === "web"
+          ? "not_required"
+          : c.credentialId
+            ? "present"
+            : c.nativeCredentialRef
+              ? "native_only"
+              : c.gateway && c.gateway.sourceId !== "cpa"
+                ? "gateway_only"
+                : "missing",
       credentialCheckState: c.credentialState || null,
       modelAvailability: verification,
       historicalEvaluations: this.evaluations(c.id, undefined, data),
@@ -613,8 +616,11 @@ export class Resources {
           }));
         return {
           ...publicValue(a),
-          ...(rights.balanceBasis === "fixed_daily" ? {balance: rights.balance} : {}),
-          automaticCheckin: a.enabled !== false && automaticCheckin(this.store, a),
+          ...(rights.balanceBasis === "fixed_daily"
+            ? { balance: rights.balance }
+            : {}),
+          automaticCheckin:
+            a.enabled !== false && automaticCheckin(this.store, a),
           integration: this.distribution?.hubEligibility(a),
           entitlement: rights,
           checkins,
@@ -832,7 +838,10 @@ export class Resources {
     const accounts = this.store.list("account");
     return {
       observedAt: new Date().toISOString(),
-      sites: this.store.list("site").filter((s) => !s.removed && !s.mergedInto && !s.resourceExcluded).length,
+      sites: this.store
+        .list("site")
+        .filter((s) => !s.removed && !s.mergedInto && !s.resourceExcluded)
+        .length,
       channels: Object.fromEntries(
         ["general", "media", "rp", "client"].map((p) => [
           p,
@@ -841,8 +850,11 @@ export class Resources {
       ),
       dailyEntitlements: accounts
         .filter(
-          (a) => !a.mergedInto && a.enabled !== false &&
-            !this.store.get("site", a.siteId)?.resourceExcluded && entitlement(a).daily,
+          (a) =>
+            !a.mergedInto &&
+            a.enabled !== false &&
+            !this.store.get("site", a.siteId)?.resourceExcluded &&
+            entitlement(a).daily,
         )
         .map((a) => ({ accountId: a.id, ...entitlement(a) })),
       checkins: this.store.db

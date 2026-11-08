@@ -177,6 +177,11 @@ export function maintenanceStatus(
     site = store.get("site", c.siteId),
     account = store.get("account", c.accountId);
   const issues = archiveOf(c, site);
+  const catalog =
+    c.catalogObservation &&
+    (c.catalogObservation.connectionVersion || 1) === (c.connectionVersion || 1)
+      ? c.catalogObservation
+      : null;
   const reason =
     Object.values(c.healthWindows || {}).find((w) => w.count > 0 &&
       w.connectionVersion === (c.connectionVersion || 1))?.detail ||
@@ -188,11 +193,10 @@ export function maintenanceStatus(
       ? "维护中"
       : c.management?.state === "closed"
         ? "网站关闭"
-        : "");
+          : "") ||
+    (catalog && catalog.status !== "ok" ? "模型目录检查未通过" : "");
   const pending =
-    !!reason ||
-    issues.length > 0 ||
-    (c.catalogObservation && c.catalogObservation.status !== "ok");
+    !!reason || issues.length > 0 || !!(catalog && catalog.status !== "ok");
   const keyError = ["invalid", "authentication_failed", "missing_key"].includes(
     c.credentialState,
   );

@@ -1,3 +1,4 @@
+import { hasBookmarkWork } from "./bookmark-imports.mjs";
 import { policies } from "./resources.mjs";
 import { reviewManaged } from "./maintenance-policy.mjs";
 import { reconcileCheckinArchives } from "./checkin-health.mjs";
@@ -47,6 +48,29 @@ export class Scheduler {
           sourceId: s.id,
           scope: "calls",
         });
+    }
+    if (!hasBookmarkWork(this.store)) {
+      for (const op of this.store
+        .list("operation")
+        .filter(
+          (o) =>
+            o.kind === "evaluate" &&
+            o.input.automatic &&
+            o.state === "waiting" &&
+            !o.claimedRunId,
+        )) {
+        const ref = op.input.taskRef;
+        const task =
+          ref &&
+          this.store
+            .list("task")
+            .find((t) => t.source === ref.source && t.externalId === ref.id);
+        if (task?.requiresBookmarkWork)
+          this.operations.update(op.id, {
+            state: "cancelled",
+            stage: "当前没有待处理书签，等待下一次真实任务",
+          });
+      }
     }
     if (!p.enabled) return;
     reconcileCheckinArchives(this.store);

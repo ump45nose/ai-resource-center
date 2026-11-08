@@ -17,6 +17,7 @@ import {
   isInternal,
   channelHeaders,
   tagsOf,
+  gatewayBlock,
 } from "./channel-rules.mjs";
 import {
   verified,
@@ -74,6 +75,14 @@ const active = (c) =>
   !archiveOf(c).length &&
   !isRemoved(c) &&
   !["paused", "maintenance", "closed"].includes(c.management?.state) &&
+  !c.management?.prohibited;
+const bootstrapChannel = (c) =>
+  c.onboarding?.target === "newapi" &&
+  !(c.models || []).length &&
+  !gatewayBlock(c) &&
+  !archiveOf(c).length &&
+  !isRemoved(c) &&
+  !["paused", "closed", "maintenance"].includes(c.management?.state) &&
   !c.management?.prohibited;
 
 // One durable outbox serves all targets. Credentials stay in the vault; jobs contain references only.
@@ -362,6 +371,7 @@ export class Distribution {
         (c) =>
           id !== "newapi" ||
           active(c) ||
+          bootstrapChannel(c) ||
           !!this.store.get("targetLink", `${id}:${c.id}`)?.remoteId ||
           c.gateway?.sourceId === this.source(this.config(id)).id,
       )
@@ -794,6 +804,7 @@ export class Distribution {
     )
       return link.observedSnapshot.status === 1;
     if (link?.snapshot && link.appliedAt) return link.snapshot.status === 1;
+    if (link?.snapshot && link.configuredAt) return link.snapshot.status === 1;
     const observation = c.sourceObservation;
     if (
       observation?.gateway?.sourceId === c.gateway?.sourceId &&
@@ -1009,9 +1020,11 @@ export class Distribution {
             appliedRevision: j.revision,
             appliedAt: now(),
           }
-        : state === "conflict"
-          ? { conflictSnapshot: result.snapshot }
-          : {}),
+        : state === "waiting" && result.remoteId && result.snapshot
+          ? { snapshot: result.snapshot, configuredAt: now() }
+          : state === "conflict"
+            ? { conflictSnapshot: result.snapshot }
+            : {}),
     });
     if (state === "applied") this.onApplied?.(j);
     return { acknowledged: true, id, state };
@@ -1030,7 +1043,9 @@ export class Distribution {
       p = j.payload,
       c = this.store.require("channel", j.subject),
       link = this.store.get("targetLink", `newapi:${c.id}`);
-    const shouldEnable = p.enabled && p.routing?.available !== false;
+    const bootstrap = bootstrapChannel(c);
+    const shouldEnable =
+      p.enabled && p.routing?.available !== false && !bootstrap;
     if (
       tagsOf(c).includes("client_restricted") &&
       !c.nativePassthrough &&
@@ -1039,6 +1054,7 @@ export class Distribution {
       throw new Problem(409, "等待指定客户端验证 New API 透传");
     if (shouldEnable && (!p.credentialId || !p.models.length))
       throw new Problem(409, "等待补 key 或选定模型");
+    if (bootstrap && !p.credentialId) throw new Problem(409, "等待补 key");
     const unverified = p.models.filter(
       (m) =>
         !(
@@ -1056,7 +1072,7 @@ export class Distribution {
     let remote = link?.remoteId
       ? await this.sources.request(source, `/api/channel/${link.remoteId}`)
       : await findByTag(this.sources, source, `arc-managed-${c.id}`);
-    if (!remote && !shouldEnable) {
+    if (!remote && !shouldEnable && !bootstrap) {
       if (p.enabled)
         throw new Problem(409, p.routing?.reasons.join("、") || "权益尚不可用");
       return { remoteId: null, snapshot: null };
@@ -1078,7 +1094,7 @@ export class Distribution {
           : remote?.header_override || "",
       type: channelType(p.protocol, remote),
     };
-    const write = shouldEnable ? desired : { status: 2 };
+    const write = shouldEnable || bootstrap ? desired : { status: 2 };
     if (
       remote &&
       link?.snapshot &&
@@ -1196,7 +1212,12 @@ export class Distribution {
     return {
       remoteId: after.id,
       snapshot: owned(after),
-      reason: !shouldEnable && p.enabled ? p.routing?.reasons.join("、") : null,
+      ...(bootstrap
+        ? { state: "waiting", reason: "New API 已建档，等待选定模型" }
+        : {
+            reason:
+              !shouldEnable && p.enabled ? p.routing?.reasons.join("、") : null,
+          }),
     };
   }
   claim(auth) {
